@@ -137,3 +137,10 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
+
+# cache files
+*.DS_Store
+
+# training results 
+ray_results/
+ray_results/*
