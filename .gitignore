@@ -144,3 +144,7 @@ cython_debug/
 # training results 
 ray_results/
 ray_results/*
+
+# video rendering 
+video/
+video/*
