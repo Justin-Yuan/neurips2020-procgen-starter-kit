@@ -76,17 +76,17 @@ def create_parser(parser_creator=None):
         help="Emulate multiple cluster nodes for debugging.")
     parser.add_argument(
         "--ray-redis-max-memory",
-        default=None,
+        default=4000000000,
         type=int,
         help="--redis-max-memory to use if starting a new cluster.")
     parser.add_argument(
         "--ray-memory",
-        default=None,
+        default=4000000000,
         type=int,
         help="--memory to use if starting a new cluster.")
     parser.add_argument(
         "--ray-object-store-memory",
-        default=None,
+        default=4000000000,
         type=int,
         help="--object-store-memory to use if starting a new cluster.")
     parser.add_argument(
