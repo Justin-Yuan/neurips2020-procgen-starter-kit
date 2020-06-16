@@ -77,7 +77,7 @@ fi
 
 
 if [[ " $@ " =~ " --rollout " ]]; then
-  export VALID_RUN=true
+  export VALID_RUN=true     
   export ROLLOUT_RUN=$(cat $EXPERIMENT | grep '  run:' | awk '{print $2}')
   export ROLLOUT_ENV=$(cat $EXPERIMENT | grep '  env:' | awk '{print $2}')
 
