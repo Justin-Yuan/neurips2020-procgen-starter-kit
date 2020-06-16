@@ -3,6 +3,10 @@ from ray.rllib.agents.dqn.dqn import GenericOffPolicyTrainer
 from ray.rllib.agents.sac.sac_tf_policy import SACTFPolicy
 from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 
+from ray.rllib.agents.sac.sac_torch_policy import SACTorchPolicy
+from algorithms.drq_agent.drq_policy import DrqSACTorchPolicy
+
+
 OPTIMIZER_SHARED_CONFIGS = [
     "buffer_size", "prioritized_replay", "prioritized_replay_alpha",
     "prioritized_replay_beta", "prioritized_replay_eps",
@@ -151,10 +155,19 @@ def validate_config(config):
                 error=True)
 
 
-SACTrainer = GenericOffPolicyTrainer.with_updates(
+# prevent sanme name as normal SAC
+NoAugSACTrainer = GenericOffPolicyTrainer.with_updates(
     name="SAC",
     default_config=DEFAULT_CONFIG,
     validate_config=validate_config,
-    default_policy=SACTFPolicy,
+    default_policy=SACTorchPolicy,
+    get_policy_class=get_policy_class,
+)
+
+DrqSACTrainer = GenericOffPolicyTrainer.with_updates(
+    name="SAC",
+    default_config=DEFAULT_CONFIG,
+    validate_config=validate_config,
+    default_policy=DrqSACTorchPolicy,
     get_policy_class=get_policy_class,
 )

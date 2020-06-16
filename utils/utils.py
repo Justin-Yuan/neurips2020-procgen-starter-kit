@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 def mkdirs(*paths):
     for path in paths:
         if not os.path.exists(path):
-            os.mkdirs(path)
+            os.makedirs(path)
 
 
 def eval_token(token):

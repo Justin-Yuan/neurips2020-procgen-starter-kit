@@ -2,7 +2,7 @@ from ray.rllib.agents.trainer import with_common_config
 from ray.rllib.agents.dqn.dqn import GenericOffPolicyTrainer
 from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 
-from algorithms.curl_agent.curl_policy import CurlTorchPolicy
+from algorithms.dreamer_agent.dreamer_policy import DreamerTorchPolicy
 
 
 OPTIMIZER_SHARED_CONFIGS = [
@@ -154,8 +154,8 @@ def validate_config(config):
 
 
 
-CurlTrainer = GenericOffPolicyTrainer.with_updates(
-    name="Curl",
+DreamerTrainer = GenericOffPolicyTrainer.with_updates(
+    name="Dreamer",
     default_config=DEFAULT_CONFIG,
     validate_config=validate_config,
     default_policy=CurlTorchPolicy,

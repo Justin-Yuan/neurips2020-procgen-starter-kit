@@ -472,8 +472,8 @@ def setup_late_mixins(policy, obs_space, action_space, config):
     TargetNetworkMixin.__init__(policy)
 
 
-SACTorchPolicy = build_torch_policy(
-    name="SACTorchPolicy",
+DreamerTorchPolicy = build_torch_policy(
+    name="DreamerTorchPolicy",
     loss_fn=actor_critic_loss,
     get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
     stats_fn=stats,
@@ -485,18 +485,3 @@ SACTorchPolicy = build_torch_policy(
     mixins=[TargetNetworkMixin, ComputeTDErrorMixin],
     action_distribution_fn=action_distribution_fn,
 )
-
-################################################################################################
-# NOTE: subclass SAC Policy to insert augmenteations
-
-class DrqSACTorchPolicy(SACTorchPolicy):
-    def __init__(self, obs_space, action_space, config):
-        super.__init__(obs_space, action_space, config)
-
-        image_pad = config["max_shift"]
-        obs_shape = obs_space.shape[-1]
-        self.trans = nn.Sequential(
-            nn.ReplicationPad2d(image_pad),
-            kornia.augmentation.RandomCrop((obs_shape, obs_shape))
-
-################################################################################################
