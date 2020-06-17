@@ -1,4 +1,4 @@
-from gym.spaces import Discrete
+from gym.spaces import Discrete, Box
 import logging
 
 import ray
@@ -12,7 +12,13 @@ from ray.rllib.policy.torch_policy_template import build_torch_policy
 from ray.rllib.models.torch.torch_action_dist import (
     TorchCategorical, TorchSquashedGaussian, TorchDiagGaussian, TorchBeta)
 from ray.rllib.utils import try_import_torch
-import kornia
+
+from ray.rllib.models import ModelCatalog
+# from ray.rllib.agents.sac.sac_tf_model import SACTFModel
+# from ray.rllib.agents.sac.sac_torch_model import SACTorchModel
+from ray.rllib.utils.error import UnsupportedSpaceException
+from models.custom_sac_torch import AugSACTorchModel
+
 
 torch, nn = try_import_torch()
 F = nn.functional
@@ -20,8 +26,76 @@ F = nn.functional
 logger = logging.getLogger(__name__)
 
 
-def build_sac_model_and_action_dist(policy, obs_space, action_space, config):
-    model = build_sac_model(policy, obs_space, action_space, config)
+
+""" modified from sac_tf_policy.py
+"""
+def build_aug_sac_model(policy, obs_space, action_space, config):
+    if config["model"].get("custom_model"):
+        logger.warning(
+            "Setting use_state_preprocessor=True since a custom model "
+            "was specified.")
+        config["use_state_preprocessor"] = True
+    if not isinstance(action_space, (Box, Discrete)):
+        raise UnsupportedSpaceException(
+            "Action space {} is not supported for SAC.".format(action_space))
+    if isinstance(action_space, Box) and len(action_space.shape) > 1:
+        raise UnsupportedSpaceException(
+            "Action space has multiple dimensions "
+            "{}. ".format(action_space.shape) +
+            "Consider reshaping this into a single dimension, "
+            "using a Tuple action space, or the multi-agent API.")
+
+    # infer num_outpus as action space dim (not embedding size!!)
+    _, num_outputs = ModelCatalog.get_action_dist(
+        action_space, config["model"], framework="torch")
+
+    # Force-ignore any additionally provided hidden layer sizes.
+    # Everything should be configured using SAC's "Q_model" and "policy_model"
+    # settings.
+    policy.model = AugSACTorchModel(
+        obs_space=obs_space,
+        action_space=action_space,
+        num_outputs=num_outputs,
+        model_config=config["model"],
+        name="sac_model",
+        actor_hidden_activation=config["policy_model"]["fcnet_activation"],
+        actor_hiddens=config["policy_model"]["fcnet_hiddens"],
+        critic_hidden_activation=config["Q_model"]["fcnet_activation"],
+        critic_hiddens=config["Q_model"]["fcnet_hiddens"],
+        twin_q=config["twin_q"],
+        initial_alpha=config["initial_alpha"],
+        target_entropy=config["target_entropy"],
+        augmentation=config["augmentation"],
+        aug_num=config["aug_num"],
+        max_shift=config["max_shift"]) 
+
+
+    policy.target_model = AugSACTorchModel(
+        obs_space=obs_space,
+        action_space=action_space,
+        num_outputs=num_outputs,
+        model_config=config["model"],
+        name="target_sac_model",
+        actor_hidden_activation=config["policy_model"]["fcnet_activation"],
+        actor_hiddens=config["policy_model"]["fcnet_hiddens"],
+        critic_hidden_activation=config["Q_model"]["fcnet_activation"],
+        critic_hiddens=config["Q_model"]["fcnet_hiddens"],
+        twin_q=config["twin_q"],
+        initial_alpha=config["initial_alpha"],
+        target_entropy=config["target_entropy"],
+        augmentation=config["augmentation"],
+        aug_num=config["aug_num"],
+        max_shift=config["max_shift"])
+
+    return policy.model
+
+
+
+
+
+
+def build_aug_sac_model_and_action_dist(policy, obs_space, action_space, config):
+    model = build_aug_sac_model(policy, obs_space, action_space, config)
     action_dist_class = get_dist_class(config, action_space)
     return model, action_dist_class
 
@@ -48,11 +122,19 @@ def action_distribution_fn(policy,
                            explore=None,
                            timestep=None,
                            is_training=None):
-    model_out, _ = model({
+    ################################################################################################
+    # model_out, _ = model({
+    #     "obs": obs_batch,
+    #     "is_training": is_training,
+    # }, [], None)
+    # distribution_inputs = model.get_policy_output(model_out)
+
+    # NOTE: model forward output logits directly 
+    distribution_inputs, _ = model({
         "obs": obs_batch,
         "is_training": is_training,
     }, [], None)
-    distribution_inputs = model.get_policy_output(model_out)
+    ################################################################################################
     action_dist_class = get_dist_class(policy.config, policy.action_space)
 
     return distribution_inputs, action_dist_class, []
@@ -79,32 +161,33 @@ def actor_critic_loss(policy, model, _, train_batch):
     # }, [], None)
 
     # NOTE: augmentation 
-    aug_num = policy['aug_num']
     model_out_t_augs, model_out_tp1_augs, target_model_out_tp1_augs = [], [], []
-    for _ in range(aug_num):
+    for _ in range(model.aug_num):
         # augmented obs 
-        augCurSampleBatch = policy.trans(train_batch[SampleBatch.CUR_OBS])
-        augNextSampleBatch = policy.trans(train_batch[SampleBatch.NEXT_OBS])
+        augCurSampleBatch = model.trans(
+            train_batch[SampleBatch.CUR_OBS].permute(0,3,1,2).float())
+        augNextSampleBatch = model.trans(
+            train_batch[SampleBatch.NEXT_OBS].permute(0,3,1,2).float())
 
         # cur obs embeddings
-        model_out_t, _ = model({
+        model_out_t = model.get_embeddings({
             "obs": augCurSampleBatch,
             "is_training": True,
-        }, [], None)
+        }, [], None, permute=False)
         model_out_t_augs.append(model_out_t)
 
         # next obs embeddings 
-        model_out_tp1, _ = model({
+        model_out_tp1 = model.get_embeddings({
             "obs": augNextSampleBatch,
             "is_training": True,
-        }, [], None)
+        }, [], None, permute=False)
         model_out_tp1_augs.append(model_out_tp1)
 
         # target next obs embeddings 
-        target_model_out_tp1, _ = policy.target_model({
+        target_model_out_tp1 = policy.target_model.get_embeddings({
             "obs": augNextSampleBatch,
             "is_training": True,
-        }, [], None)
+        }, [], None, permute=False)
         target_model_out_tp1_augs.append(target_model_out_tp1)
     ################################################################################################
 
@@ -296,7 +379,7 @@ def actor_critic_loss(policy, model, _, train_batch):
         if policy.config["twin_q"]:
             twin_q_t_selected = twin_q_t_selected_augs[i]
             critic_loss[1] += 0.5 * torch.mean(
-                torch.pow(q_t_selected_target - twin_q_t_selected, 2.0)))
+                torch.pow(q_t_selected_target - twin_q_t_selected, 2.0))
 
     # normalized critic loss across augmented obs 
     td_error /= len(q_t_selected_augs)
@@ -472,8 +555,9 @@ def setup_late_mixins(policy, obs_space, action_space, config):
     TargetNetworkMixin.__init__(policy)
 
 
-SACTorchPolicy = build_torch_policy(
-    name="SACTorchPolicy",
+
+DrqSACTorchPolicy = build_torch_policy(
+    name="DrqSACTorchPolicy",
     loss_fn=actor_critic_loss,
     get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
     stats_fn=stats,
@@ -481,22 +565,7 @@ SACTorchPolicy = build_torch_policy(
     extra_grad_process_fn=apply_grad_clipping,
     optimizer_fn=optimizer_fn,
     after_init=setup_late_mixins,
-    make_model_and_action_dist=build_sac_model_and_action_dist,
+    make_model_and_action_dist=build_aug_sac_model_and_action_dist,
     mixins=[TargetNetworkMixin, ComputeTDErrorMixin],
     action_distribution_fn=action_distribution_fn,
 )
-
-################################################################################################
-# NOTE: subclass SAC Policy to insert augmenteations
-
-class DrqSACTorchPolicy(SACTorchPolicy):
-    def __init__(self, obs_space, action_space, config):
-        super.__init__(obs_space, action_space, config)
-
-        image_pad = config["max_shift"]
-        obs_shape = obs_space.shape[-1]
-        self.trans = nn.Sequential(
-            nn.ReplicationPad2d(image_pad),
-            kornia.augmentation.RandomCrop((obs_shape, obs_shape))
-
-################################################################################################

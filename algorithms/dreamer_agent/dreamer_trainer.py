@@ -158,6 +158,6 @@ DreamerTrainer = GenericOffPolicyTrainer.with_updates(
     name="Dreamer",
     default_config=DEFAULT_CONFIG,
     validate_config=validate_config,
-    default_policy=CurlTorchPolicy,
+    default_policy=DreamerTorchPolicy,
     get_policy_class=get_policy_class,
 )

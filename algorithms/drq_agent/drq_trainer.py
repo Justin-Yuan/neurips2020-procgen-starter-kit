@@ -37,6 +37,11 @@ DEFAULT_CONFIG = with_common_config({
     # Ignored for discrete action spaces.
     "normalize_actions": True,
 
+    # === Customs ===
+    "augmentation": True,
+    "aug_num": 2,
+    "max_shift": 4,  
+
     # === Learning ===
     # Disable setting done=True at end of episode. This should be set to True
     # for infinite-horizon MDPs (e.g., many continuous control problems).
@@ -126,13 +131,6 @@ DEFAULT_CONFIG = with_common_config({
 # yapf: enable
 
 
-def get_policy_class(config):
-    if config["framework"] == "torch":
-        from ray.rllib.agents.sac.sac_torch_policy import SACTorchPolicy
-        return SACTorchPolicy
-    else:
-        return SACTFPolicy
-
 
 def validate_config(config):
     if config.get("grad_norm_clipping", DEPRECATED_VALUE) != DEPRECATED_VALUE:
@@ -157,17 +155,17 @@ def validate_config(config):
 
 # prevent sanme name as normal SAC
 NoAugSACTrainer = GenericOffPolicyTrainer.with_updates(
-    name="SAC",
+    name="NoAugSAC",
     default_config=DEFAULT_CONFIG,
     validate_config=validate_config,
     default_policy=SACTorchPolicy,
-    get_policy_class=get_policy_class,
+    get_policy_class=lambda x: SACTorchPolicy,
 )
 
 DrqSACTrainer = GenericOffPolicyTrainer.with_updates(
-    name="SAC",
+    name="DrqSAC",
     default_config=DEFAULT_CONFIG,
     validate_config=validate_config,
     default_policy=DrqSACTorchPolicy,
-    get_policy_class=get_policy_class,
+    get_policy_class=lambda x: DrqSACTorchPolicy,
 )

@@ -296,7 +296,7 @@ def actor_critic_loss(policy, model, _, train_batch):
         if policy.config["twin_q"]:
             twin_q_t_selected = twin_q_t_selected_augs[i]
             critic_loss[1] += 0.5 * torch.mean(
-                torch.pow(q_t_selected_target - twin_q_t_selected, 2.0)))
+                torch.pow(q_t_selected_target - twin_q_t_selected, 2.0))
 
     # normalized critic loss across augmented obs 
     td_error /= len(q_t_selected_augs)

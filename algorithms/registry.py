@@ -25,13 +25,13 @@ def _import_drq_sac_agent():
     from .drq_agent.drq_trainer import DrqSACTrainer
     return DrqSACTrainer
 
-def _import_curl_agent():
-    from .curl_agent.curl_trainer import CurlTrainer
-    return CurlTrainer
+# def _import_curl_agent():
+#     from .curl_agent.curl_trainer import CurlTrainer
+#     return CurlTrainer
 
-def _import_dreamer_agent():
-    from .dreamer_agent.dreamer_trainer import DreamerTrainer
-    return DreamerTrainer
+# def _import_dreamer_agent():
+#     from .dreamer_agent.dreamer_trainer import DreamerTrainer
+#     return DreamerTrainer
 
 
 
@@ -39,6 +39,6 @@ CUSTOM_ALGORITHMS = {
     "custom/CustomRandomAgent": _import_custom_random_agent,
     "custom/NoAugSACTrainer": _import_no_aug_sac_agent,
     "custom/DrqSACTrainer": _import_drq_sac_agent,
-    "custom/CurlTrainer": _import_curl_agent,
-    "custom/DreamerTrainer": _import_dreamer_agent,
+    # "custom/CurlTrainer": _import_curl_agent,
+    # "custom/DreamerTrainer": _import_dreamer_agent,
 }
