@@ -10,7 +10,7 @@ from models.impala_cnn_torch import ResidualBlock, ConvSequence
 from ray.rllib.utils.annotations import override
 import kornia
 
-class AugSACTorchModel(TorchModelV2, nn.Module):
+class DrqSACTorchModel(TorchModelV2, nn.Module):
     """Extension of standard TorchModelV2 for SAC.
 
     Data flow:
@@ -252,4 +252,4 @@ class AugSACTorchModel(TorchModelV2, nn.Module):
 
 
 # Register model in ModelCatalog
-ModelCatalog.register_custom_model("custom_sac", AugSACTorchModel)
+ModelCatalog.register_custom_model("drq_sac", DrqSACTorchModel)

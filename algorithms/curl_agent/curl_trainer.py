@@ -2,7 +2,8 @@ from ray.rllib.agents.trainer import with_common_config
 from ray.rllib.agents.dqn.dqn import GenericOffPolicyTrainer
 from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 
-from algorithms.curl_agent.curl_policy import CurlTorchPolicy
+# from ray.rllib.agents.sac.sac_torch_policy import SACTorchPolicy
+from algorithms.curl_agent.curl_policy import CurlSACTorchPolicy
 
 
 OPTIMIZER_SHARED_CONFIGS = [
@@ -34,6 +35,11 @@ DEFAULT_CONFIG = with_common_config({
     # Unsquash actions to the upper and lower bounds of env's action space.
     # Ignored for discrete action spaces.
     "normalize_actions": True,
+
+    # === Customs ===
+    "augmentation": True,
+    "aug_num": 2,
+    "max_shift": 4,  
 
     # === Learning ===
     # Disable setting done=True at end of episode. This should be set to True
@@ -124,13 +130,6 @@ DEFAULT_CONFIG = with_common_config({
 # yapf: enable
 
 
-def get_policy_class(config):
-    if config["framework"] == "torch":
-        from ray.rllib.agents.sac.sac_torch_policy import SACTorchPolicy
-        return SACTorchPolicy
-    else:
-        return SACTFPolicy
-
 
 def validate_config(config):
     if config.get("grad_norm_clipping", DEPRECATED_VALUE) != DEPRECATED_VALUE:
@@ -138,7 +137,7 @@ def validate_config(config):
         config["grad_clip"] = config.pop("grad_norm_clipping")
 
     # Use same keys as for standard Trainer "model" config.
-    for model in ["Q_model", "policy_model"]:
+    for model in ["Q_model", "policy_model"]: 0
         if config[model].get("hidden_activation", DEPRECATED_VALUE) != \
                 DEPRECATED_VALUE:
             deprecation_warning(
@@ -153,11 +152,10 @@ def validate_config(config):
                 error=True)
 
 
-
-CurlTrainer = GenericOffPolicyTrainer.with_updates(
-    name="Curl",
+CurlSACTrainer = GenericOffPolicyTrainer.with_updates(
+    name="CurlSAC",
     default_config=DEFAULT_CONFIG,
     validate_config=validate_config,
-    default_policy=CurlTorchPolicy,
-    get_policy_class=get_policy_class,
+    default_policy=CurlSACTorchPolicy,
+    get_policy_class=lambda x: DrqSACTorchPolicy,
 )

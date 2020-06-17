@@ -17,7 +17,7 @@ from ray.rllib.models import ModelCatalog
 # from ray.rllib.agents.sac.sac_tf_model import SACTFModel
 # from ray.rllib.agents.sac.sac_torch_model import SACTorchModel
 from ray.rllib.utils.error import UnsupportedSpaceException
-from models.custom_sac_torch import AugSACTorchModel
+from models.drq_sac_torch import DrqSACTorchModel
 
 
 torch, nn = try_import_torch()
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 """ modified from sac_tf_policy.py
 """
-def build_aug_sac_model(policy, obs_space, action_space, config):
+def build_drq_sac_model(policy, obs_space, action_space, config):
     if config["model"].get("custom_model"):
         logger.warning(
             "Setting use_state_preprocessor=True since a custom model "
@@ -52,7 +52,7 @@ def build_aug_sac_model(policy, obs_space, action_space, config):
     # Force-ignore any additionally provided hidden layer sizes.
     # Everything should be configured using SAC's "Q_model" and "policy_model"
     # settings.
-    policy.model = AugSACTorchModel(
+    policy.model = DrqSACTorchModel(
         obs_space=obs_space,
         action_space=action_space,
         num_outputs=num_outputs,
@@ -70,7 +70,7 @@ def build_aug_sac_model(policy, obs_space, action_space, config):
         max_shift=config["max_shift"]) 
 
 
-    policy.target_model = AugSACTorchModel(
+    policy.target_model = DrqSACTorchModel(
         obs_space=obs_space,
         action_space=action_space,
         num_outputs=num_outputs,
@@ -90,12 +90,8 @@ def build_aug_sac_model(policy, obs_space, action_space, config):
     return policy.model
 
 
-
-
-
-
-def build_aug_sac_model_and_action_dist(policy, obs_space, action_space, config):
-    model = build_aug_sac_model(policy, obs_space, action_space, config)
+def build_drq_sac_model_and_action_dist(policy, obs_space, action_space, config):
+    model = build_drq_sac_model(policy, obs_space, action_space, config)
     action_dist_class = get_dist_class(config, action_space)
     return model, action_dist_class
 
@@ -565,7 +561,7 @@ DrqSACTorchPolicy = build_torch_policy(
     extra_grad_process_fn=apply_grad_clipping,
     optimizer_fn=optimizer_fn,
     after_init=setup_late_mixins,
-    make_model_and_action_dist=build_aug_sac_model_and_action_dist,
+    make_model_and_action_dist=build_drq_sac_model_and_action_dist,
     mixins=[TargetNetworkMixin, ComputeTDErrorMixin],
     action_distribution_fn=action_distribution_fn,
 )

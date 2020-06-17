@@ -140,6 +140,8 @@ cython_debug/
 
 # cache files
 *.DS_Store
+.vscode/
+.vscode/*
 
 # training results 
 ray_results/
