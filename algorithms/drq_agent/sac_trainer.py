@@ -22,14 +22,14 @@ DEFAULT_CONFIG = with_common_config({
     # RLlib model options for the Q function(s).
     "Q_model": {
         "fcnet_activation": "relu",
-        "fcnet_hiddens": [64],
+        "fcnet_hiddens": [64, 64],
         "hidden_activation": DEPRECATED_VALUE,
         "hidden_layer_sizes": DEPRECATED_VALUE,
     },
     # RLlib model options for the policy function.
     "policy_model": {
         "fcnet_activation": "relu",
-        "fcnet_hiddens": [64],
+        "fcnet_hiddens": [64, 64],
         "hidden_activation": DEPRECATED_VALUE,
         "hidden_layer_sizes": DEPRECATED_VALUE,
     },
