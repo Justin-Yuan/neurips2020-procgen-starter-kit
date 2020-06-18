@@ -164,7 +164,7 @@ drq_sac:
         # === Customs ===
         ################################################
         ################################################
-        augmentation: True
+        augmentation: False
         aug_num: 2
         max_shift: 4 
 

@@ -1,7 +1,7 @@
 import logging
 
 from ray.rllib.agents import with_common_config
-from ray.rllib.agents.ppo.ppo_tf_policy import PPOTFPolicy
+from ray.rllib.agents.ppo.ppo_torch_policy import PPOTorchPolicy
 from ray.rllib.agents.trainer_template import build_trainer
 from ray.rllib.execution.rollout_ops import ParallelRollouts, ConcatBatches, \
     StandardizeFields, SelectExperiences
@@ -165,6 +165,13 @@ class UpdateKL:
 
         self.workers.local_worker().foreach_trainable_policy(update)
 
+def get_policy_class(config):
+    # if config["framework"] == "torch":
+    if config["use_pytorch"] == True:
+        from ray.rllib.agents.ppo.ppo_torch_policy import PPOTorchPolicy
+        return PPOTorchPolicy
+    else:
+        return PPOTFPolicy
 
 def execution_plan(workers, config):
     rollouts = ParallelRollouts(workers, mode="bulk_sync")
@@ -189,15 +196,19 @@ def execution_plan(workers, config):
     return StandardMetricsReporting(train_op, workers, config) \
         .for_each(lambda result: warn_about_bad_reward_scales(config, result))
 
+#TODO: create two policy, one for aug, one for no aug in get_policy_class 
+# according to config
 
-PPOTrainer = build_trainer(
-    name="PPO",
+NoAugPPOTrainer = build_trainer(
+    name="NoAugPPO",
     default_config=DEFAULT_CONFIG,
-    default_policy=PPOTFPolicy,
+    default_policy=PPOTorchPolicy,
     execution_plan=execution_plan,
-    validate_config=validate_config)
+    validate_config=validate_config,
+    get_policy_class=get_policy_class,
+    )
 
-DrqPPOTrainer = PPOTrainer.with_updates(
+DrqPPOTrainer = NoAugPPOTrainer.with_updates(
     name="DrqPPO",
     default_config=DEFAULT_CONFIG,
     default_policy=DrqPPOTorchPolicy,
