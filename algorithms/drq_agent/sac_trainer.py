@@ -4,7 +4,7 @@ from ray.rllib.agents.sac.sac_tf_policy import SACTFPolicy
 from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 
 from ray.rllib.agents.sac.sac_torch_policy import SACTorchPolicy
-from algorithms.drq_agent.drq_policy import DrqSACTorchPolicy
+from algorithms.drq_agent.sac_policy import DrqSACTorchPolicy
 
 
 OPTIMIZER_SHARED_CONFIGS = [
@@ -22,14 +22,14 @@ DEFAULT_CONFIG = with_common_config({
     # RLlib model options for the Q function(s).
     "Q_model": {
         "fcnet_activation": "relu",
-        "fcnet_hiddens": [256, 256],
+        "fcnet_hiddens": [64],
         "hidden_activation": DEPRECATED_VALUE,
         "hidden_layer_sizes": DEPRECATED_VALUE,
     },
     # RLlib model options for the policy function.
     "policy_model": {
         "fcnet_activation": "relu",
-        "fcnet_hiddens": [256, 256],
+        "fcnet_hiddens": [64],
         "hidden_activation": DEPRECATED_VALUE,
         "hidden_layer_sizes": DEPRECATED_VALUE,
     },

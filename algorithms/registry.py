@@ -18,11 +18,11 @@ def _import_custom_random_agent():
     return CustomRandomAgent
 
 def _import_no_aug_sac_agent():
-    from .drq_agent.drq_trainer import NoAugSACTrainer
+    from .drq_agent.sac_trainer import NoAugSACTrainer
     return NoAugSACTrainer
 
 def _import_drq_sac_agent():
-    from .drq_agent.drq_trainer import DrqSACTrainer
+    from .drq_agent.sac_trainer import DrqSACTrainer
     return DrqSACTrainer
 
 def _import_drq_ppo_agent():

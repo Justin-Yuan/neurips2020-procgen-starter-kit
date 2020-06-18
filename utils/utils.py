@@ -14,7 +14,7 @@ from ray.rllib.models.action_dist import ActionDistribution
 from ray.rllib.models.torch.torch_action_dist import TorchDistributionWrapper
 from ray.rllib.models.torch.misc import normc_initializer, SlimFC
 from ray.tune.logger import Logger, VALID_SUMMARY_TYPES
-from ray.tune.util import flatten_dict
+from ray.tune.utils import flatten_dict
 from ray.tune.result import (TRAINING_ITERATION, TIME_TOTAL_S, TIMESTEPS_TOTAL)
 
 import logging
