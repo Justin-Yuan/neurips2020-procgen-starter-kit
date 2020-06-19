@@ -158,8 +158,10 @@ class DrqSACTorchModel(TorchModelV2, nn.Module):
         """
         x = self.get_embeddings(input_dict, state, seq_lens)
         logits = self.get_policy_output(x)
-        value = self.get_q_values(x)
-        self._value = value.squeeze(1)
+        # only need value during training 
+        if input_dict["is_training"]:
+            value = self.get_q_values(x)
+            self._value = value.squeeze(1)
         return logits, state
 
     @override(TorchModelV2)

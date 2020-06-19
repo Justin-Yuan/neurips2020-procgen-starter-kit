@@ -103,9 +103,11 @@ def build_ppo_model_and_action_dist(policy, obs_space, action_space, config):
     """ shared between NoAug & Drq PPO torch policy 
     """
     # make model
-    _, num_outputs = ModelCatalog.get_action_dist(
-        action_space, config["model"], framework="torch"
-    ) 
+    # _, num_outputs = ModelCatalog.get_action_dist(
+    #     action_space, config["model"], framework="torch"
+    # ) 
+    num_outputs = action_space.n
+
     policy.model = DrqPPOTorchModel(
         obs_space=obs_space,
         action_space=action_space,
@@ -258,8 +260,8 @@ def drq_ppo_surrogate_loss(policy, model, dist_class, train_batch):
     # return policy.loss_obj.loss
 
     # NOTE: averaged augmented loss for ppo 
-    aug_num = policy.config['aug_num']
-    aug_loss = []
+    aug_num = policy.config["aug_num"]
+    aug_loss = 0
     orig_cur_obs = train_batch[SampleBatch.CUR_OBS].clone()
 
     for _ in range(aug_num):
@@ -298,8 +300,9 @@ def drq_ppo_surrogate_loss(policy, model, dist_class, train_batch):
             vf_loss_coeff=policy.config["vf_loss_coeff"],
             use_gae=policy.config["use_gae"],
         )
-        aug_loss.append(policy.loss_obj.loss)
-    return sum(aug_loss)/len(aug_loss)
+        # accumulate loss with augmented obs 
+        aug_loss += policy.loss_obj.loss
+    return aug_loss / aug_num
     ################################################################################################
 
 

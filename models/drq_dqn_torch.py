@@ -7,7 +7,7 @@ from ray.rllib.utils import try_import_torch
 torch, nn = try_import_torch()
 
 
-class DrqRainbowTorchModel(TorchModelV2, nn.Module):
+class DrqDQNTorchModel(TorchModelV2, nn.Module):
     """Extension of standard TorchModelV2 to provide dueling-Q functionality.
     """
 
@@ -29,6 +29,9 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
             #  Exploration type and do not have any LayerNorm layers in
             #  the net.
             add_layer_norm=False,
+            #  customs 
+            activation="relu",  # for no dueling q value branch
+            embed_dim = 256,
             augmentation=False,
             aug_num=2,
             max_shift=4,
@@ -51,11 +54,27 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
             add_layer_norm (bool): Enable layer norm (for param noise).
         """
         nn.Module.__init__(self)
-        super(DrqRainbowTorchModel, self).__init__(obs_space, action_space,
+        super(DrqDQNTorchModel, self).__init__(obs_space, action_space,
                                             num_outputs, model_config, name)
 
+        # NOTE: customs 
+        self.embed_dim = embed_dim
+        h, w, c = obs_space.shape
+        shape = (c, h, w)
+
+        # obs embedding 
+        conv_seqs = []
+        for out_channels in [16, 32, 32]:
+            conv_seq = ConvSequence(shape, out_channels)
+            shape = conv_seq.get_output_shape()
+            conv_seqs.append(conv_seq)
+        self.conv_seqs = nn.ModuleList(conv_seqs)
+        self.hidden_fc = nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=embed_dim)
+
+        # NOTE: value output branches 
         self.dueling = dueling
-        ins = num_outputs
+        # ins = num_outputs
+        ins = embed_dim
 
         # Dueling case: Build the shared (advantages and value) fc-network.
         advantage_module = nn.Sequential()
@@ -93,12 +112,30 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
         # Non-dueling:
         # Q-value layer (use main module's outputs as Q-values).
         else:
-            pass
+            # pass (UGLY HACK!!!)
+            # NOTE: manually adding q value (no dueling) branch following embedding
+            for i, n in enumerate(q_hiddens):
+                 advantage_module.add_module("Q_{}".format(i),
+                                            nn.Linear(ins, n))
+                if activation == "relu":
+                    advantage_module.add_module("Q_act_{}".format(i),
+                                                nn.ReLU())
+                elif activation == "tanh":
+                    advantage_module.add_module("Q_act_{}".format(i),
+                                                nn.Tanh())
+                # Add LayerNorm after each Dense.
+                if add_layer_norm:
+                    advantage_module.add_module("LayerNorm_Q_{}".format(i),
+                                                nn.LayerNorm(n))
+                ins = n
+            # Actual Q value layer (nodes=num-actions) and
+            # value layer (nodes=1).
+            advantage_module.add_module("Q", nn.Linear(ins, action_space.n))
 
         self.advantage_module = advantage_module
         self.value_module = value_module
 
-        # customs 
+        # NOTE: customs 
         self.augmentation = augmentation
         self.aug_num = aug_num
         if augmentation:
@@ -176,7 +213,31 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
 
     def _f_epsilon(self, x):
         return torch.sign(x) * torch.pow(torch.abs(x), 0.5)
+    
+    # customs 
+    @override(TorchModelV2)
+    def forward(self, input_dict, state, seq_lens):
+        """ return embedding value
+        """
+        x = self.get_embeddings(input_dict, state, seq_lens)
+        logits = self.get_policy_output(x)
+        return logits, state
+
+    def get_embeddings(self, input_dict, state, seq_lens, permute=True):
+        """ encode observations 
+        """
+        x = input_dict["obs"].float()
+        x = x / 255.0  # scale to 0-1
+        if permute:
+            x = x.permute(0, 3, 1, 2)  # NHWC => NCHW
+        for conv_seq in self.conv_seqs:
+            x = conv_seq(x)
+        x = torch.flatten(x, start_dim=1)
+        x = nn.functional.relu(x)
+        x = self.hidden_fc(x)
+        x = nn.functional.relu(x)
+        return x
 
 
 # Register model in ModelCatalog
-ModelCatalog.register_custom_model("drq_rainbow", DrqRainbowTorchModel)
+ModelCatalog.register_custom_model("drq_dqn", DrqDQNTorchModel)

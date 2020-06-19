@@ -41,9 +41,9 @@ class DrqPPOTorchModel(TorchModelV2, nn.Module):
             shape = conv_seq.get_output_shape()
             conv_seqs.append(conv_seq)
         self.conv_seqs = nn.ModuleList(conv_seqs)
-        self.hidden_fc = nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=256)
-        self.logits_fc = nn.Linear(in_features=256, out_features=num_outputs)
-        self.value_fc = nn.Linear(in_features=256, out_features=1)
+        self.hidden_fc = nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=embed_dim)
+        self.logits_fc = nn.Linear(in_features=embed_dim, out_features=num_outputs)
+        self.value_fc = nn.Linear(in_features=embed_dim, out_features=1)
 
         # customs 
         self.augmentation = augmentation

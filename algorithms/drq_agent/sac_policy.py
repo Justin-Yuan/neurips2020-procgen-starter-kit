@@ -58,9 +58,10 @@ def build_drq_sac_model(policy, obs_space, action_space, config):
             "Consider reshaping this into a single dimension, "
             "using a Tuple action space, or the multi-agent API.")
 
-    # infer num_outpus as action space dim (not embedding size!!)
-    _, num_outputs = ModelCatalog.get_action_dist(
-        action_space, config["model"], framework="torch")
+    # # infer num_outpus as action space dim (not embedding size!!)
+    # _, num_outputs = ModelCatalog.get_action_dist(
+    #     action_space, config["model"], framework="torch")
+    num_outputs = action_space.n
 
     # Force-ignore any additionally provided hidden layer sizes.
     # Everything should be configured using SAC's "Q_model" and "policy_model"
