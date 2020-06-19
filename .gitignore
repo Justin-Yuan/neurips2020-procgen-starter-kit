@@ -152,3 +152,5 @@ ray_results/*
 # video rendering 
 video/
 video/*
+videos/
+videos/*
