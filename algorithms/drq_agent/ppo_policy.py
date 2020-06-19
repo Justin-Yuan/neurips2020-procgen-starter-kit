@@ -16,9 +16,12 @@ from ray.rllib.policy.torch_policy_template import build_torch_policy
 from ray.rllib.utils.explained_variance import explained_variance
 from ray.rllib.utils.torch_ops import sequence_mask
 from ray.rllib.utils import try_import_torch
+
+# custom imports 
 from models.drq_ppo_torch import DrqPPOTorchModel
 from ray.rllib.models import ModelCatalog
 from ray.rllib.evaluation.postprocessing import Postprocessing, compute_advantages
+from ray.rllib.agents.ppo.ppo_torch_policy import ppo_surrogate_loss
 
 torch, nn = try_import_torch()
 
@@ -26,19 +29,15 @@ logger = logging.getLogger(__name__)
 
 
 #######################################################################################################
-#####################################   Augmentations   #####################################################
+#####################################   Postprocessing   #####################################################
 #######################################################################################################
 
-
-def postprocess_ppo_gae(policy,
+def postprocess_drq_ppo_gae(policy,
                         sample_batch,
                         other_agent_batches=None,
                         episode=None):
-    """Adds the policy logits, VF preds, and advantages to the trajectory."""
-    # sample_batch = [SampleBatch.CUR_OBS] = policy._lazy_tensor_dict({
-    #     SampleBatch.CUR_OBS:sample_batch[SampleBatch.CUR_OBS],
-    #     "is_training":True
-    # })
+    """Adds the policy logits, VF preds, and advantages to the trajectory.
+    """
     completed = sample_batch["dones"][-1]
     batch_final = None 
 
@@ -100,13 +99,13 @@ def postprocess_ppo_gae(policy,
 #####################################   Model   #####################################################
 #######################################################################################################
 
-def build_aug_ppo_model(policy, obs_space, action_space, config):
+def build_ppo_model_and_action_dist(policy, obs_space, action_space, config):
+    """ shared between NoAug & Drq PPO torch policy 
+    """
+    # make model
     _, num_outputs = ModelCatalog.get_action_dist(
-        action_space, config["model"], framework="torch")
-
-    # Force-ignore any additionally provided hidden layer sizes.
-    # Everything should be configured using SAC's "Q_model" and "policy_model"
-    # settings.
+        action_space, config["model"], framework="torch"
+    ) 
     policy.model = DrqPPOTorchModel(
         obs_space=obs_space,
         action_space=action_space,
@@ -115,13 +114,12 @@ def build_aug_ppo_model(policy, obs_space, action_space, config):
         name="ppo_model",
         augmentation=config["augmentation"],
         aug_num=config["aug_num"],
-        max_shift=config["max_shift"]) 
-    return policy.model
-
-def build_aug_ppo_torch_policy(policy, obs_space, action_space, config):
-    model = build_aug_ppo_model(policy, obs_space, action_space, config)
+        max_shift=config["max_shift"]
+    ) 
+    # make action output distrib
     action_dist_class = get_dist_class(config, action_space)
-    return model, action_dist_class
+    return policy.model, action_dist_class
+
 
 def get_dist_class(config, action_space):
     if isinstance(action_space, Discrete):
@@ -227,9 +225,39 @@ class PPOLoss:
         self.loss = loss
 
 
-def ppo_surrogate_loss(policy, model, dist_class, train_batch):
-    """ loss function entry point 
+def drq_ppo_surrogate_loss(policy, model, dist_class, train_batch):
+    """ loss function for PPO with input augmentations
     """
+    ################################################################################################
+    # logits, state = model.from_batch(train_batch)
+    # action_dist = dist_class(logits, model)
+    # mask = None
+    # if state:
+    #     max_seq_len = torch.max(train_batch["seq_lens"])
+    #     mask = sequence_mask(train_batch["seq_lens"], max_seq_len)
+    #     mask = torch.reshape(mask, [-1])
+    # policy.loss_obj = PPOLoss(
+    #     dist_class,
+    #     model,
+    #     train_batch[Postprocessing.VALUE_TARGETS],
+    #     train_batch[Postprocessing.ADVANTAGES],
+    #     train_batch[SampleBatch.ACTIONS],
+    #     train_batch[SampleBatch.ACTION_DIST_INPUTS],
+    #     train_batch[SampleBatch.ACTION_LOGP],
+    #     train_batch[SampleBatch.VF_PREDS],
+    #     action_dist,
+    #     model.value_function(),
+    #     policy.kl_coeff,
+    #     mask,
+    #     entropy_coeff=policy.entropy_coeff,
+    #     clip_param=policy.config["clip_param"],
+    #     vf_clip_param=policy.config["vf_clip_param"],
+    #     vf_loss_coeff=policy.config["vf_loss_coeff"],
+    #     use_gae=policy.config["use_gae"],
+    # )
+    # return policy.loss_obj.loss
+
+    # NOTE: averaged augmented loss for ppo 
     aug_num = policy.config['aug_num']
     aug_loss = []
     orig_cur_obs = train_batch[SampleBatch.CUR_OBS].clone()
@@ -272,6 +300,7 @@ def ppo_surrogate_loss(policy, model, dist_class, train_batch):
         )
         aug_loss.append(policy.loss_obj.loss)
     return sum(aug_loss)/len(aug_loss)
+    ################################################################################################
 
 
 def kl_and_loss_stats(policy, train_batch):
@@ -353,17 +382,36 @@ def setup_mixins(policy, obs_space, action_space, config):
 #####################################   Policy   #####################################################
 #######################################################################################################
 
-DrqPPOTorchPolicy = build_torch_policy(
-    name="DrqPPOTorchPolicy",
-    get_default_config=lambda: ray.rllib.agents.ppo.ppo.DEFAULT_CONFIG,
+NoAugPPOTorchPolicy = build_torch_policy(
+    name="NoAugPPOTorchPolicy",
     loss_fn=ppo_surrogate_loss,
+    postprocess_fn=postprocess_ppo_gae,
+    make_model_and_action_dist=build_ppo_model_and_action_dist,
+    # shared 
+    get_default_config=lambda: ray.rllib.agents.ppo.ppo.DEFAULT_CONFIG,
     stats_fn=kl_and_loss_stats,
     extra_action_out_fn=vf_preds_fetches,
-    postprocess_fn=postprocess_ppo_gae,
     extra_grad_process_fn=apply_grad_clipping,
     before_init=setup_config,
     after_init=setup_mixins,
-    make_model_and_action_dist=build_aug_ppo_torch_policy,
+    mixins=[
+        LearningRateSchedule, EntropyCoeffSchedule, KLCoeffMixin,
+        ValueNetworkMixin
+    ])
+
+
+DrqPPOTorchPolicy = build_torch_policy(
+    name="DrqPPOTorchPolicy",
+    loss_fn=drq_ppo_surrogate_loss,
+    postprocess_fn=postprocess_drq_ppo_gae,
+    make_model_and_action_dist=build_ppo_model_and_action_dist,
+    # shared 
+    get_default_config=lambda: ray.rllib.agents.ppo.ppo.DEFAULT_CONFIG,
+    stats_fn=kl_and_loss_stats,
+    extra_action_out_fn=vf_preds_fetches,
+    extra_grad_process_fn=apply_grad_clipping,
+    before_init=setup_config,
+    after_init=setup_mixins,
     mixins=[
         LearningRateSchedule, EntropyCoeffSchedule, KLCoeffMixin,
         ValueNetworkMixin

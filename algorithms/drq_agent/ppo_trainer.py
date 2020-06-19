@@ -1,6 +1,7 @@
 import logging
 
 from ray.rllib.agents import with_common_config
+from ray.rllib.agents.ppo.ppo_tf_policy import PPOTFPolicy
 from ray.rllib.agents.ppo.ppo_torch_policy import PPOTorchPolicy
 from ray.rllib.agents.trainer_template import build_trainer
 from ray.rllib.execution.rollout_ops import ParallelRollouts, ConcatBatches, \
@@ -8,11 +9,18 @@ from ray.rllib.execution.rollout_ops import ParallelRollouts, ConcatBatches, \
 from ray.rllib.execution.train_ops import TrainOneStep
 from ray.rllib.execution.metric_ops import StandardMetricsReporting
 from ray.rllib.utils import try_import_tf
-from algorithms.drq_agent.ppo_policy import DrqPPOTorchPolicy
+
+# custom imports
+from algorithms.drq_agent.ppo_policy import NoAugPPOTorchPolicy, DrqPPOTorchPolicy
 
 tf = try_import_tf()
 
 logger = logging.getLogger(__name__)
+
+
+#######################################################################################################
+#####################################   Config Template  #####################################################
+#######################################################################################################
 
 # yapf: disable
 # __sphinx_doc_begin__
@@ -83,6 +91,26 @@ DEFAULT_CONFIG = with_common_config({
 })
 # __sphinx_doc_end__
 # yapf: enable
+
+
+#######################################################################################################
+#####################################   Helper funcs   #####################################################
+#######################################################################################################
+
+def get_policy_class(config):
+    ################################################################################################
+    # if config["use_pytorch"] == "torch":
+    #     from ray.rllib.agents.ppo.ppo_torch_policy import PPOTorchPolicy
+    #     return PPOTorchPolicy
+    # else:
+    #     return PPOTFPolicy
+
+    # NOTE: switch between policy with/without input augmentations
+    if config["augmentation"] == True:
+        return DrqPPOTorchPolicy
+    else:
+        return NoAugPPOTorchPolicy
+    ################################################################################################
 
 
 def warn_about_bad_reward_scales(config, result):
@@ -165,13 +193,6 @@ class UpdateKL:
 
         self.workers.local_worker().foreach_trainable_policy(update)
 
-def get_policy_class(config):
-    # if config["framework"] == "torch":
-    if config["use_pytorch"] == True:
-        from ray.rllib.agents.ppo.ppo_torch_policy import PPOTorchPolicy
-        return PPOTorchPolicy
-    else:
-        return PPOTFPolicy
 
 def execution_plan(workers, config):
     rollouts = ParallelRollouts(workers, mode="bulk_sync")
@@ -196,21 +217,19 @@ def execution_plan(workers, config):
     return StandardMetricsReporting(train_op, workers, config) \
         .for_each(lambda result: warn_about_bad_reward_scales(config, result))
 
-#TODO: create two policy, one for aug, one for no aug in get_policy_class 
+
+#######################################################################################################
+#####################################   Trainer   #####################################################
+#######################################################################################################
+
+# create two policy, one for aug, one for no aug in get_policy_class 
 # according to config
 
-NoAugPPOTrainer = build_trainer(
-    name="NoAugPPO",
-    default_config=DEFAULT_CONFIG,
-    default_policy=PPOTorchPolicy,
-    execution_plan=execution_plan,
-    validate_config=validate_config,
-    get_policy_class=get_policy_class,
-    )
-
-DrqPPOTrainer = NoAugPPOTrainer.with_updates(
+DrqPPOTrainer = build_trainer(
     name="DrqPPO",
     default_config=DEFAULT_CONFIG,
     default_policy=DrqPPOTorchPolicy,
-    get_policy_class=lambda  x: DrqPPOTorchPolicy,
+    get_policy_class=get_policy_class,
+    execution_plan=execution_plan,
+    validate_config=validate_config
 )

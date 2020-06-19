@@ -3,9 +3,13 @@ from ray.rllib.agents.dqn.dqn import GenericOffPolicyTrainer
 from ray.rllib.agents.sac.sac_tf_policy import SACTFPolicy
 from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 
-from ray.rllib.agents.sac.sac_torch_policy import SACTorchPolicy
-from algorithms.drq_agent.sac_policy import DrqSACTorchPolicy
+# custom imports
+from algorithms.drq_agent.sac_policy import NoAugSACTorchPolicy, DrqSACTorchPolicy
 
+
+#######################################################################################################
+#####################################   Config Template  #####################################################
+#######################################################################################################
 
 OPTIMIZER_SHARED_CONFIGS = [
     "buffer_size", "prioritized_replay", "prioritized_replay_alpha",
@@ -131,6 +135,25 @@ DEFAULT_CONFIG = with_common_config({
 # yapf: enable
 
 
+#######################################################################################################
+#####################################   Helper funcs  #####################################################
+#######################################################################################################
+
+def get_policy_class(config):
+    ################################################################################################
+    # if config["framework"] == "torch":
+    #     from ray.rllib.agents.sac.sac_torch_policy import SACTorchPolicy
+    #     return SACTorchPolicy
+    # else:
+    #     return SACTFPolicy
+
+    # NOTE: switch between policy with/without input augmentations
+    if config["augmentation"] == True:
+        return DrqSACTorchPolicy
+    else:
+        return NoAugSACTorchPolicy
+    ################################################################################################
+
 
 def validate_config(config):
     if config.get("grad_norm_clipping", DEPRECATED_VALUE) != DEPRECATED_VALUE:
@@ -153,19 +176,15 @@ def validate_config(config):
                 error=True)
 
 
-# prevent sanme name as normal SAC
-NoAugSACTrainer = GenericOffPolicyTrainer.with_updates(
-    name="NoAugSAC",
-    default_config=DEFAULT_CONFIG,
-    validate_config=validate_config,
-    default_policy=SACTorchPolicy,
-    get_policy_class=lambda x: SACTorchPolicy,
-)
+#######################################################################################################
+#####################################   Trainer  #####################################################
+#######################################################################################################
+
 
 DrqSACTrainer = GenericOffPolicyTrainer.with_updates(
     name="DrqSAC",
     default_config=DEFAULT_CONFIG,
     validate_config=validate_config,
     default_policy=DrqSACTorchPolicy,
-    get_policy_class=lambda x: DrqSACTorchPolicy,
+    get_policy_class=get_policy_class,
 )

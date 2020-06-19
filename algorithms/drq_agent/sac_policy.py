@@ -13,11 +13,11 @@ from ray.rllib.models.torch.torch_action_dist import (
     TorchCategorical, TorchSquashedGaussian, TorchDiagGaussian, TorchBeta)
 from ray.rllib.utils import try_import_torch
 
+# custom imports 
 from ray.rllib.models import ModelCatalog
-# from ray.rllib.agents.sac.sac_tf_model import SACTFModel
-# from ray.rllib.agents.sac.sac_torch_model import SACTorchModel
 from ray.rllib.utils.error import UnsupportedSpaceException
 from models.drq_sac_torch import DrqSACTorchModel
+from ray.rllib.agents.sac.sac_torch_policy import actor_critic_loss
 
 
 torch, nn = try_import_torch()
@@ -25,9 +25,22 @@ F = nn.functional
 
 logger = logging.getLogger(__name__)
 
+#######################################################################################################
+#####################################   Model  #####################################################
+#######################################################################################################
+
+def build_sac_model_and_action_dist(policy, obs_space, action_space, config):
+    """ shared between NoAug & Drq SAC torch policy 
+    """
+    # make model 
+    model = build_drq_sac_model(policy, obs_space, action_space, config)
+    # make action output distrib
+    action_dist_class = get_dist_class(config, action_space)
+    return model, action_dist_class
 
 
-""" modified from sac_tf_policy.py
+""" modified from `build_sac_model` from 
+https://github.com/ray-project/ray/blob/master/rllib/agents/sac/sac_tf_policy.py
 """
 def build_drq_sac_model(policy, obs_space, action_space, config):
     if config["model"].get("custom_model"):
@@ -90,12 +103,6 @@ def build_drq_sac_model(policy, obs_space, action_space, config):
     return policy.model
 
 
-def build_drq_sac_model_and_action_dist(policy, obs_space, action_space, config):
-    model = build_drq_sac_model(policy, obs_space, action_space, config)
-    action_dist_class = get_dist_class(config, action_space)
-    return model, action_dist_class
-
-
 def get_dist_class(config, action_space):
     if isinstance(action_space, Discrete):
         return TorchCategorical
@@ -136,7 +143,11 @@ def action_distribution_fn(policy,
     return distribution_inputs, action_dist_class, []
 
 
-def actor_critic_loss(policy, model, _, train_batch):
+#######################################################################################################
+#####################################   Loss func   #####################################################
+#######################################################################################################
+
+def drq_actor_critic_loss(policy, model, _, train_batch):
     # Should be True only for debugging purposes (e.g. test cases)!
     deterministic = policy.config["_deterministic_loss"]
 
@@ -460,6 +471,9 @@ def stats(policy, train_batch):
         "min_q": torch.min(policy.q_t),
     }
 
+#######################################################################################################
+#####################################   Mixins   #####################################################
+#######################################################################################################
 
 def optimizer_fn(policy, config):
     """Creates all necessary optimizers for SAC learning.
@@ -551,17 +565,36 @@ def setup_late_mixins(policy, obs_space, action_space, config):
     TargetNetworkMixin.__init__(policy)
 
 
+#######################################################################################################
+#####################################   Policy   #####################################################
+#######################################################################################################
 
-DrqSACTorchPolicy = build_torch_policy(
-    name="DrqSACTorchPolicy",
+NoAugSACTorchPolicy = build_torch_policy(
+    name="NoAugSACTorchPolicy",
     loss_fn=actor_critic_loss,
+    make_model_and_action_dist=build_sac_model_and_action_dist,
+    action_distribution_fn=action_distribution_fn,
+    # shared
     get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
     stats_fn=stats,
     postprocess_fn=postprocess_trajectory,
     extra_grad_process_fn=apply_grad_clipping,
     optimizer_fn=optimizer_fn,
     after_init=setup_late_mixins,
-    make_model_and_action_dist=build_drq_sac_model_and_action_dist,
-    mixins=[TargetNetworkMixin, ComputeTDErrorMixin],
+    mixins=[TargetNetworkMixin, ComputeTDErrorMixin]
+)
+
+DrqSACTorchPolicy = build_torch_policy(
+    name="DrqSACTorchPolicy",
+    loss_fn=drq_actor_critic_loss,
+    make_model_and_action_dist=build_sac_model_and_action_dist,
     action_distribution_fn=action_distribution_fn,
+    # shared
+    get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
+    stats_fn=stats,
+    postprocess_fn=postprocess_trajectory,
+    extra_grad_process_fn=apply_grad_clipping,
+    optimizer_fn=optimizer_fn,
+    after_init=setup_late_mixins,
+    mixins=[TargetNetworkMixin, ComputeTDErrorMixin]
 )

@@ -28,7 +28,11 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
             #  generic option, then error if we use ParameterNoise as
             #  Exploration type and do not have any LayerNorm layers in
             #  the net.
-            add_layer_norm=False):
+            add_layer_norm=False,
+            augmentation=False,
+            aug_num=2,
+            max_shift=4,
+            **kwargs):
         """Initialize variables of this model.
         Extra model kwargs:
             dueling (bool): Whether to build the advantage(A)/value(V) heads
@@ -93,6 +97,16 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
 
         self.advantage_module = advantage_module
         self.value_module = value_module
+
+        # customs 
+        self.augmentation = augmentation
+        self.aug_num = aug_num
+        if augmentation:
+            obs_shape = obs_space.shape[-2]
+            self.trans = nn.Sequential(
+                nn.ReplicationPad2d(max_shift),
+                kornia.augmentation.RandomCrop((obs_shape, obs_shape))
+            )
 
     def get_advantages_or_q_values(self, model_out):
         """Returns distributional values for Q(s, a) given a state embedding.

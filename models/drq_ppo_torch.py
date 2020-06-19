@@ -31,14 +31,6 @@ class DrqPPOTorchModel(TorchModelV2, nn.Module):
         self.action_outs = q_outs = self.action_dim
         self.action_ins = None  # No action inputs for the discrete case.
         self.embed_dim = embed_dim
-    
-
-        if augmentation:
-            obs_shape = obs_space.shape[-2]
-        self.trans = nn.Sequential(
-            nn.ReplicationPad2d(max_shift),
-            kornia.augmentation.RandomCrop((obs_shape, obs_shape))
-        )
 
         h, w, c = obs_space.shape
         shape = (c, h, w)
@@ -52,6 +44,16 @@ class DrqPPOTorchModel(TorchModelV2, nn.Module):
         self.hidden_fc = nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=256)
         self.logits_fc = nn.Linear(in_features=256, out_features=num_outputs)
         self.value_fc = nn.Linear(in_features=256, out_features=1)
+
+        # customs 
+        self.augmentation = augmentation
+        self.aug_num = aug_num
+        if augmentation:
+            obs_shape = obs_space.shape[-2]
+            self.trans = nn.Sequential(
+                nn.ReplicationPad2d(max_shift),
+                kornia.augmentation.RandomCrop((obs_shape, obs_shape))
+            )
         
     @override(TorchModelV2)
     def forward(self, input_dict, state, seq_lens):
