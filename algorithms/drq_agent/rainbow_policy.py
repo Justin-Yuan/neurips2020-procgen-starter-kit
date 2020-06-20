@@ -123,62 +123,136 @@ def get_distribution_inputs_and_class(policy,
 #####################################   Loss funcs   #####################################################
 #######################################################################################################
 
-# def compute_q_values(policy, model, obs, explore, is_training=False):
-#     if policy.config["num_atoms"] > 1:
-#         raise ValueError("torch DQN does not support distributional DQN yet!")
+def compute_q_values(policy, model, obs, explore, is_training=False):
+    """ supports normal DQN and distributional DQN now 
+    """
+    # # NOTE: LAZY DEV
+    # if policy.config["num_atoms"] > 1:
+    #     raise ValueError("torch DQN does not support distributional DQN yet!")
+    config = policy.config
 
-#     model_out, state = model({
-#         SampleBatch.CUR_OBS: obs,
-#         "is_training": is_training,
-#     }, [], None)
+    model_out, state = model({
+        SampleBatch.CUR_OBS: obs,
+        "is_training": is_training,
+    }, [], None)
 
-#     advantages_or_q_values = model.get_advantages_or_q_values(model_out)
+    out = model.get_advantages_or_q_values(model_out)
+    if config["num_atoms"] > 1:
+        (advantages_or_q_values, z, support_logits_per_action, logits, dist) = out
+    else:
+        (advantages_or_q_values, logits, dist) = out
 
-#     if policy.config["dueling"]:
-#         state_value = model.get_state_value(model_out)
-#         advantages_mean = reduce_mean_ignore_inf(advantages_or_q_values, 1)
-#         advantages_centered = advantages_or_q_values - torch.unsqueeze(
-#             advantages_mean, 1)
-#         q_values = state_value + advantages_centered
-#     else:
-#         q_values = advantages_or_q_values
+    if policy.config["dueling"]:
+        state_value = model.get_state_value(model_out)
+        
+        if config["num_atoms"] > 1:
+            support_logits_per_action_mean = torch.mean(support_logits_per_action, 1)
 
-#     return q_values
+            support_logits_per_action_centered = support_logits_per_action - torch.unsqueeze(
+                support_logits_per_action_mean, 1)
+
+            support_logits_per_action = torch.unsqueeze(
+                state_value, 1) + support_logits_per_action_centered
+
+            support_prob_per_action = F.softmax(support_logits_per_action)
+
+            value = torch.sum(z * support_prob_per_action, dim=-1)
+            logits = support_logits_per_action
+            dist = support_prob_per_action
+        else:
+            advantages_mean = reduce_mean_ignore_inf(advantages_or_q_values, 1)
+            advantages_centered = advantages_or_q_values - torch.unsqueeze(
+                advantages_mean, 1)
+            q_values = state_value + advantages_centered
+    else:
+        q_values = advantages_or_q_values
+
+    # return q_values
+    return q_values, logits, dist 
 
 
-# class QLoss:
-#     def __init__(self,
-#                  q_t_selected,
-#                  q_tp1_best,
-#                  importance_weights,
-#                  rewards,
-#                  done_mask,
-#                  gamma=0.99,
-#                  n_step=1,
-#                  num_atoms=1,
-#                  v_min=-10.0,
-#                  v_max=10.0):
+# adapted from https://github.com/ray-project/ray/blob/master/rllib/agents/dqn/dqn_tf_policy.py
+class QLoss:
+    """ accomodates both normal bellman error and distributional Q loss 
+    """
+    def __init__(self,
+                 q_t_selected,
+                 q_logits_t_selected,   # for distributional 
+                 q_tp1_best,
+                 q_dist_tp1_best,   # for distributional
+                 importance_weights,
+                 rewards,
+                 done_mask,
+                 gamma=0.99,
+                 n_step=1,
+                 num_atoms=1,
+                 v_min=-10.0,
+                 v_max=10.0):
 
-#         if num_atoms > 1:
-#             raise ValueError("Torch version of DQN does not support "
-#                              "distributional Q yet!")
+        if num_atoms > 1:
+            # # NOTE: LAZY DEV
+            # raise ValueError("Torch version of DQN does not support "
+            #                  "distributional Q yet!")
 
-#         q_tp1_best_masked = (1.0 - done_mask) * q_tp1_best
+            # Distributional Q-learning which corresponds to an entropy loss
+            z = torch.arange(num_atoms).float().to(q_dist_tp1_best.device)
+            z = v_min + z * (v_max - v_min) / float(num_atoms - 1)
 
-#         # compute RHS of bellman equation
-#         q_t_selected_target = rewards + gamma**n_step * q_tp1_best_masked
+            # (batch_size, 1) * (1, num_atoms) = (batch_size, num_atoms)
+            r_tau = torch.unsqueeze(rewards, -1) + gamma**n_step * torch.unsqueeze(
+                    1.0 - done_mask, -1) * torch.unsqueeze(z, 0)
+            r_tau = torch.clamp(r_tau, v_min, v_max)
+            b = (r_tau - v_min) / ((v_max - v_min) / float(num_atoms - 1))
+            lb = torch.floor(b)
+            ub = torch.ceil(b)
+             # indispensable judgement which is missed in most implementations
+            # when b happens to be an integer, lb == ub, so pr_j(s', a*) will
+            # be discarded because (ub-b) == (b-lb) == 0
+            floor_equal_ceil = torch.le(ub - lb, 0.5).float()
 
-#         # compute the error (potentially clipped)
-#         self.td_error = q_t_selected - q_t_selected_target.detach()
-#         self.loss = torch.mean(
-#             importance_weights.float() * huber_loss(self.td_error))
-#         self.stats = {
-#             "mean_q": torch.mean(q_t_selected),
-#             "min_q": torch.min(q_t_selected),
-#             "max_q": torch.max(q_t_selected),
-#             "td_error": self.td_error,
-#             "mean_td_error": torch.mean(self.td_error),
-#         }
+            # (batch_size, num_atoms, num_atoms)
+            l_project = F.one_hot(lb.long(), num_atoms)  
+            # (batch_size, num_atoms, num_atoms)
+            u_project = F.one_hot(ub.long(), num_atoms)  
+            ml_delta = q_dist_tp1_best * (ub - b + floor_equal_ceil)
+            mu_delta = q_dist_tp1_best * (b - lb)
+            ml_delta = torch.sum(
+                l_project * torch.unsqueeze(ml_delta, -1), dim=1)
+            mu_delta = torch.sum(
+                u_project * torch.unsqueeze(mu_delta, -1), dim=1)
+            m = ml_delta + mu_delta
+
+            # Rainbow paper claims that using this cross entropy loss for
+            # priority is robust and insensitive to `prioritized_replay_alpha`
+
+            # self.td_error = tf.nn.softmax_cross_entropy_with_logits(
+            #     labels=m, logits=q_logits_t_selected)
+            # pytorch equivalent to tf.nn.softmax_cross_entropy_with_logits
+            # https://gist.github.com/tejaskhot/cf3d087ce4708c422e68b3b747494b9f
+            self.td_error = -m * F.log_softmax(q_logits_t_selected, -1)
+            self.loss = torch.mean(
+                self.td_error * importance_weights.float())
+            self.stats = {
+                # TODO: better Q stats for dist dqn
+                "mean_td_error": tf.reduce_mean(self.td_error),
+            }
+        else:
+            q_tp1_best_masked = (1.0 - done_mask) * q_tp1_best
+
+            # compute RHS of bellman equation
+            q_t_selected_target = rewards + gamma**n_step * q_tp1_best_masked
+
+            # compute the error (potentially clipped)
+            self.td_error = q_t_selected - q_t_selected_target.detach()
+            self.loss = torch.mean(
+                importance_weights.float() * huber_loss(self.td_error))
+            self.stats = {
+                "mean_q": torch.mean(q_t_selected),
+                "min_q": torch.min(q_t_selected),
+                "max_q": torch.max(q_t_selected),
+                "td_error": self.td_error,
+                "mean_td_error": torch.mean(self.td_error),
+            }
 
 
 def build_drq_q_losses(policy, model, _, train_batch):
