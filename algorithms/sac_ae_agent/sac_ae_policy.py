@@ -16,7 +16,6 @@ from ray.rllib.utils import try_import_torch
 # custom imports 
 from ray.rllib.models import ModelCatalog
 from ray.rllib.utils.error import UnsupportedSpaceException
-from models.sac_ae_torch import DrqSACAETorchModel
 from models.sac_ae_torch import SACAETorchModel
 from ray.rllib.agents.sac.sac_torch_policy import actor_critic_loss
 
@@ -85,7 +84,7 @@ def build_sac_ae_model(policy, obs_space, action_space, config):
         max_shift=config["max_shift"]) 
 
 
-    policy.target_model = DrqSACAETorchModel(
+    policy.target_model = SACAETorchModel(
         obs_space=obs_space,
         action_space=action_space,
         num_outputs=num_outputs,
@@ -170,34 +169,50 @@ def drq_actor_critic_loss(policy, model, _, train_batch):
     # }, [], None)
 
     # NOTE: augmentation 
-    model_out_t_augs, model_out_tp1_augs, target_model_out_tp1_augs = [], [], []
-    for _ in range(model.aug_num):
+    
+    # model_out_t_augs, model_out_tp1_augs, target_model_out_tp1_augs = [], [], []
+    # for _ in range(model.aug_num):
         # augmented obs 
-        augCurSampleBatch = model.trans(
-            train_batch[SampleBatch.CUR_OBS].permute(0,3,1,2).float())
-        augNextSampleBatch = model.trans(
-            train_batch[SampleBatch.NEXT_OBS].permute(0,3,1,2).float())
+        # augCurSampleBatch = model.trans(
+        #     train_batch[SampleBatch.CUR_OBS].permute(0,3,1,2).float())
+        # augNextSampleBatch = model.trans(
+        #     train_batch[SampleBatch.NEXT_OBS].permute(0,3,1,2).float())
 
         # cur obs embeddings
-        model_out_t = model.get_embeddings({
-            "obs": augCurSampleBatch,
-            "is_training": True,
-        }, [], None, permute=False)
-        model_out_t_augs.append(model_out_t)
+        # model_out_t = model.get_embeddings({
+        #     "obs": augCurSampleBatch,
+        #     "is_training": True,
+        # }, [], None, permute=False)
+        # model_out_t_augs.append(model_out_t)
 
-        # next obs embeddings 
-        model_out_tp1 = model.get_embeddings({
-            "obs": augNextSampleBatch,
-            "is_training": True,
-        }, [], None, permute=False)
-        model_out_tp1_augs.append(model_out_tp1)
+        # # next obs embeddings 
+        # model_out_tp1 = model.get_embeddings({
+        #     "obs": augNextSampleBatch,
+        #     "is_training": True,
+        # }, [], None, permute=False)
+        # model_out_tp1_augs.append(model_out_tp1)
 
-        # target next obs embeddings 
-        target_model_out_tp1 = policy.target_model.get_embeddings({
-            "obs": augNextSampleBatch,
-            "is_training": True,
-        }, [], None, permute=False)
-        target_model_out_tp1_augs.append(target_model_out_tp1)
+        # # target next obs embeddings 
+        # target_model_out_tp1 = policy.target_model.get_embeddings({
+        #     "obs": augNextSampleBatch,
+        #     "is_training": True,
+        # }, [], None, permute=False)
+        # target_model_out_tp1_augs.append(target_model_out_tp1)
+
+    model_out_t, _ = model({
+        "obs": train_batch[SampleBatch.CUR_OBS],
+        "is_training": True,
+    }, [], None)
+
+    model_out_tp1, _ = model({
+        "obs": train_batch[SampleBatch.NEXT_OBS],
+        "is_training": True,
+    }, [], None)
+
+    target_model_out_tp1, _ = policy.target_model({
+        "obs": train_batch[SampleBatch.NEXT_OBS],
+        "is_training": True,
+    }, [], None)
     ################################################################################################
 
     alpha = torch.exp(model.log_alpha)
@@ -234,58 +249,91 @@ def drq_actor_critic_loss(policy, model, _, train_batch):
         #     q_tp1_best
 
         # NOTE: Q values with augmented obs embeddings 
-        q_t_selected_augs, twin_q_t_selected_augs = [], []
-        q_tp1_best_masked_augs = []
+        # q_t_selected_augs, twin_q_t_selected_augs = [], []
+        # q_tp1_best_masked_augs = []
         # for actor loss 
-        log_pis_t_aug, policy_t_aug, q_t_aug= None, None, None 
+        # log_pis_t_aug, policy_t_aug, q_t_aug= None, None, None 
 
-        # repeat SAC Q value estimations for each augmented obs 
-        for i in range(len(model_out_t_augs)):
-            model_out_t = model_out_t_augs[i]
-            model_out_tp1 = model_out_tp1_augs[i]
-            target_model_out_tp1 = target_model_out_tp1_augs[i]
+        # # repeat SAC Q value estimations for each augmented obs 
+        # for i in range(len(model_out_t_augs)):
+        #     model_out_t = model_out_t_augs[i]
+        #     model_out_tp1 = model_out_tp1_augs[i]
+        #     target_model_out_tp1 = target_model_out_tp1_augs[i]
 
-            log_pis_t = F.log_softmax(model.get_policy_output(model_out_t), dim=-1)
-            policy_t = torch.exp(log_pis_t)
-            log_pis_tp1 = F.log_softmax(model.get_policy_output(model_out_tp1), -1)
-            policy_tp1 = torch.exp(log_pis_tp1)
-            # Q-values.
-            q_t = model.get_q_values(model_out_t)
-            # Target Q-values.
-            q_tp1 = policy.target_model.get_q_values(target_model_out_tp1)
-            if policy.config["twin_q"]:
-                twin_q_t = model.get_twin_q_values(model_out_t)
-                twin_q_tp1 = policy.target_model.get_twin_q_values(
-                    target_model_out_tp1)
-                q_tp1 = torch.min(q_tp1, twin_q_tp1)
-            q_tp1 -= alpha * log_pis_tp1
+        #     log_pis_t = F.log_softmax(
+        #         get_policy_output(model.actor_encoder(model_out_t)), 
+        #         dim=-1
+        #     )
+        #     policy_t = torch.exp(log_pis_t)
+        #     log_pis_tp1 = F.log_softmax(
+        #         model.get_policy_output(model.actor_encoder(model_out_tp1)), 
+        #         dim=-1
+        #     )
+        #     policy_tp1 = torch.exp(log_pis_tp1)
+        #     # Q-values.
+        #     q_t = model.get_q_values(model_out_t)
+        #     # Target Q-values.
+        #     q_tp1 = policy.target_model.get_q_values(target_model_out_tp1)
+        #     if policy.config["twin_q"]:
+        #         twin_q_t = model.get_twin_q_values(model_out_t)
+        #         twin_q_tp1 = policy.target_model.get_twin_q_values(
+        #             target_model_out_tp1)
+        #         q_tp1 = torch.min(q_tp1, twin_q_tp1)
+        #     q_tp1 -= alpha * log_pis_tp1
 
-            # Actually selected Q-values (from the actions batch).
-            one_hot = F.one_hot(
-                train_batch[SampleBatch.ACTIONS], num_classes=q_t.size()[-1])
-            q_t_selected = torch.sum(q_t * one_hot, dim=-1)
-            if policy.config["twin_q"]:
-                twin_q_t_selected = torch.sum(twin_q_t * one_hot, dim=-1)
-            # Discrete case: "Best" means weighted by the policy (prob) outputs.
-            q_tp1_best = torch.sum(torch.mul(policy_tp1, q_tp1), dim=-1)
-            q_tp1_best_masked = \
-                (1.0 - train_batch[SampleBatch.DONES].float()) * \
-                q_tp1_best
+        #     # Actually selected Q-values (from the actions batch).
+        #     one_hot = F.one_hot(
+        #         train_batch[SampleBatch.ACTIONS], num_classes=q_t.size()[-1])
+        #     q_t_selected = torch.sum(q_t * one_hot, dim=-1)
+        #     if policy.config["twin_q"]:
+        #         twin_q_t_selected = torch.sum(twin_q_t * one_hot, dim=-1)
+        #     # Discrete case: "Best" means weighted by the policy (prob) outputs.
+        #     q_tp1_best = torch.sum(torch.mul(policy_tp1, q_tp1), dim=-1)
+        #     q_tp1_best_masked = \
+        #         (1.0 - train_batch[SampleBatch.DONES].float()) * \
+        #         q_tp1_best
 
-            # push to containers 
-            q_t_selected_augs.append(q_t_selected)
-            if policy.config["twin_q"]:
-                twin_q_t_selected_augs.append(twin_q_t_selected)
-            q_tp1_best_masked_augs.append(q_tp1_best_masked)
+        #     # push to containers 
+        #     q_t_selected_augs.append(q_t_selected)
+        #     if policy.config["twin_q"]:
+        #         twin_q_t_selected_augs.append(twin_q_t_selected)
+        #     q_tp1_best_masked_augs.append(q_tp1_best_masked)
 
-            # only use first augmented obs for actor loss updates
-            if log_pis_t_aug is None:
-                log_pis_t_aug = log_pis_t
-                policy_t_aug = policy_t
-                q_t_aug = q_t
+        #     # only use first augmented obs for actor loss updates
+        #     if log_pis_t_aug is None:
+        #         log_pis_t_aug = log_pis_t
+        #         policy_t_aug = policy_t
+        #         q_t_aug = q_t
 
-        # get augmentation averaged target Q
-        q_tp1_best_masked_avg = sum(q_tp1_best_masked_augs) / len(q_tp1_best_masked_augs)
+        # # get augmentation averaged target Q
+        # q_tp1_best_masked_avg = sum(q_tp1_best_masked_augs) / len(q_tp1_best_masked_augs)
+        # Get all action probs directly from pi and form their logp.
+        log_pis_t = F.log_softmax(model.get_policy_output(model_out_t), dim=-1)
+        policy_t = torch.exp(log_pis_t)
+        log_pis_tp1 = F.log_softmax(model.get_policy_output(model_out_tp1), -1)
+        policy_tp1 = torch.exp(log_pis_tp1)
+        # Q-values.
+        q_t = model.get_q_values(model_out_t)
+        # Target Q-values.
+        q_tp1 = policy.target_model.get_q_values(target_model_out_tp1)
+        if policy.config["twin_q"]:
+            twin_q_t = model.get_twin_q_values(model_out_t)
+            twin_q_tp1 = policy.target_model.get_twin_q_values(
+                target_model_out_tp1)
+            q_tp1 = torch.min(q_tp1, twin_q_tp1)
+        q_tp1 -= alpha * log_pis_tp1
+
+        # Actually selected Q-values (from the actions batch).
+        one_hot = F.one_hot(
+            train_batch[SampleBatch.ACTIONS], num_classes=q_t.size()[-1])
+        q_t_selected = torch.sum(q_t * one_hot, dim=-1)
+        if policy.config["twin_q"]:
+            twin_q_t_selected = torch.sum(twin_q_t * one_hot, dim=-1)
+        # Discrete case: "Best" means weighted by the policy (prob) outputs.
+        q_tp1_best = torch.sum(torch.mul(policy_tp1, q_tp1), dim=-1)
+        q_tp1_best_masked = \
+            (1.0 - train_batch[SampleBatch.DONES].float()) * \
+            q_tp1_best
         ################################################################################################
     # Continuous actions case.
     else:
@@ -370,25 +418,63 @@ def drq_actor_critic_loss(policy, model, _, train_batch):
     td_error = 0.0
     critic_loss = [0.0, 0.0] if policy.config["twin_q"] else [0.0]
 
-    for i in range(len(q_t_selected_augs)):
-        q_t_selected = q_t_selected_augs[i]
+    # for i in range(len(q_t_selected_augs)):
+    #     q_t_selected = q_t_selected_augs[i]
 
-        # Compute the TD-error (potentially clipped).
-        base_td_error = torch.abs(q_t_selected - q_t_selected_target)
-        if policy.config["twin_q"]:
-            twin_q_t_selected = twin_q_t_selected_augs[i]
-            twin_td_error = torch.abs(twin_q_t_selected - q_t_selected_target)
-            td_error += 0.5 * (base_td_error + twin_td_error)
-        else:
-            td_error += base_td_error
+    #     # Compute the TD-error (potentially clipped).
+    #     base_td_error = torch.abs(q_t_selected - q_t_selected_target)
+    #     if policy.config["twin_q"]:
+    #         twin_q_t_selected = twin_q_t_selected_augs[i]
+    #         twin_td_error = torch.abs(twin_q_t_selected - q_t_selected_target)
+    #         td_error += 0.5 * (base_td_error + twin_td_error)
+    #     else:
+    #         td_error += base_td_error
 
-        critic_loss[0] += 0.5 * torch.mean(
-            torch.pow(q_t_selected_target - q_t_selected, 2.0))
+    #     critic_loss[0] += 0.5 * torch.mean(
+    #         torch.pow(q_t_selected_target - q_t_selected, 2.0))
         
-        if policy.config["twin_q"]:
-            twin_q_t_selected = twin_q_t_selected_augs[i]
-            critic_loss[1] += 0.5 * torch.mean(
-                torch.pow(q_t_selected_target - twin_q_t_selected, 2.0))
+    #     if policy.config["twin_q"]:
+    #         twin_q_t_selected = twin_q_t_selected_augs[i]
+    #         critic_loss[1] += 0.5 * torch.mean(
+    #             torch.pow(q_t_selected_target - twin_q_t_selected, 2.0))
+    
+    # NOTE: no aug version
+    # compute RHS of bellman equation
+    q_t_selected_target = (
+        train_batch[SampleBatch.REWARDS] +
+        (policy.config["gamma"]**policy.config["n_step"]) * q_tp1_best_masked
+    ).detach()
+
+    # Compute the TD-error (potentially clipped).
+    base_td_error = torch.abs(q_t_selected - q_t_selected_target)
+    if policy.config["twin_q"]:
+        twin_td_error = torch.abs(twin_q_t_selected - q_t_selected_target)
+        td_error = 0.5 * (base_td_error + twin_td_error)
+    else:
+        td_error = base_td_error
+
+    critic_loss = [
+        0.5 * torch.mean(torch.pow(q_t_selected_target - q_t_selected, 2.0))
+    ]
+    if policy.config["twin_q"]:
+        critic_loss.append(0.5 * torch.mean(
+            torch.pow(q_t_selected_target - twin_q_t_selected, 2.0)))
+    
+    # decoder loss
+    obs = train_batch[SampleBatch.CUR_OBS]
+    target_obs = obs
+    h = self.critic.encoder(obs)
+    if target_obs.dim() == 4:
+        # preprocess images to be in [-0.5, 0.5] range
+        target_obs = utils.preprocess_obs(target_obs)
+    rec_obs = self.decoder(h)
+    rec_loss = F.mse_loss(target_obs, rec_obs)
+
+    # add L2 penalty on latent representation
+    # see https://arxiv.org/pdf/1903.12436.pdf
+    latent_loss = (0.5 * h.pow(2).sum(1)).mean()
+
+    loss = rec_loss + self.decoder_latent_lambda * latent_loss
 
     # normalized critic loss across augmented obs 
     td_error /= len(q_t_selected_augs)
@@ -439,6 +525,9 @@ def drq_actor_critic_loss(policy, model, _, train_batch):
         # However, we must make sure `actor_loss` is not used to update
         # the Q-net(s)' variables.
         actor_loss = torch.mean(alpha.detach() * log_pis_t - q_t_det_policy)
+
+    #
+
 
     # Save for stats function.
     policy.q_t = q_t
@@ -512,8 +601,21 @@ def optimizer_fn(policy, config):
         eps=1e-7,  # to match tf.keras.optimizers.Adam's epsilon default
     )
 
+    # optimizer for critic encoder for reconstruction loss
+    self.encoder_optimizer = torch.optim.Adam(
+        self.critic.encoder.parameters(), lr=config["optimization"]["encoder_lr"]
+    )
+
+    # optimizer for decoder for reconstruction loss
+    self.decoder_optimizer = torch.optim.Adam(
+        self.decoder.parameters(),
+        lr=config["optimization"]["decoder_lr"],
+        weight_decay=config["optimization"]["decoder_weight_lambda"]
+    )
+
     return tuple([policy.actor_optim] + policy.critic_optims +
-                 [policy.alpha_optim])
+                 [policy.alpha_optim] + policy.encoder_optims + 
+                 policy.decoder_optims)
 
 
 class ComputeTDErrorMixin:
@@ -571,10 +673,10 @@ def setup_late_mixins(policy, obs_space, action_space, config):
 #####################################   Policy   #####################################################
 #######################################################################################################
 
-NoAugSACAETorchPolicy = build_torch_policy(
-    name="NoAugSACAETorchPolicy",
+SACAETorchPolicy = build_torch_policy(
+    name="SACAETorchPolicy",
     loss_fn=actor_critic_loss,
-    make_model_and_action_dist=build_sac_model_and_action_dist,
+    make_model_and_action_dist=build_sac_ae_model_and_action_dist,
     action_distribution_fn=action_distribution_fn,
     # shared
     get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
@@ -586,17 +688,18 @@ NoAugSACAETorchPolicy = build_torch_policy(
     mixins=[TargetNetworkMixin, ComputeTDErrorMixin]
 )
 
-DrqSACAETorchPolicy = build_torch_policy(
-    name="DrqSACAETorchPolicy",
-    loss_fn=drq_actor_critic_loss,
-    make_model_and_action_dist=build_sac_model_and_action_dist,
-    action_distribution_fn=action_distribution_fn,
-    # shared
-    get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
-    stats_fn=stats,
-    postprocess_fn=postprocess_trajectory,
-    extra_grad_process_fn=apply_grad_clipping,
-    optimizer_fn=optimizer_fn,
-    after_init=setup_late_mixins,
-    mixins=[TargetNetworkMixin, ComputeTDErrorMixin]
-)
+DrqSACAETorchPolicy = None
+# DrqSACAETorchPolicy = build_torch_policy(
+#     name="DrqSACAETorchPolicy",
+#     loss_fn=drq_actor_critic_loss,
+#     make_model_and_action_dist=build_sac_model_and_action_dist,
+#     action_distribution_fn=action_distribution_fn,
+#     # shared
+#     get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
+#     stats_fn=stats,
+#     postprocess_fn=postprocess_trajectory,
+#     extra_grad_process_fn=apply_grad_clipping,
+#     optimizer_fn=optimizer_fn,
+#     after_init=setup_late_mixins,
+#     mixins=[TargetNetworkMixin, ComputeTDErrorMixin]
+# )

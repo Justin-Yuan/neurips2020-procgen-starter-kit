@@ -4,7 +4,7 @@ from ray.rllib.agents.sac.sac_torch_policy import SACTorchPolicy
 from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 
 # custom imports
-from algorithms.drq_agent.sac_ae_policy import NoAugSACAETorchPolicy, DrqSACAETorchPolicy
+from algorithms.sac_ae_agent.sac_ae_policy import NoAugSACAETorchPolicy, DrqSACAETorchPolicy
 
 
 #######################################################################################################
@@ -151,7 +151,7 @@ def get_policy_class(config):
     if config["augmentation"] == True:
         return DrqSACAETorchPolicy
     else:
-        return NoAugSACAETorchPolicy
+        return SACAETorchPolicy
     ################################################################################################
 
 

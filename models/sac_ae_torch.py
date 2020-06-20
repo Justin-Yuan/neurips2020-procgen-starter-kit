@@ -1,36 +1,20 @@
-# Register model in ModelCatalog
-from ray.rllib.models import ModelCatalog
-
+# gym and np
+from gym.spaces import Discrete
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import copy
-import math
 
-import utils
+# ray
+from ray.rllib.models import ModelCatalog
+from ray.rllib.models.torch.misc import SlimFC
+from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
+from ray.rllib.utils.framework import get_activation_fn, try_import_torch
+torch, nn = try_import_torch()
+from models.impala_cnn_torch import ResidualBlock, ConvSequence
+from ray.rllib.utils.annotations import override
+# aug
+import kornia
+# ae
 from models.sac_ae_encoder import make_encoder
-from models.sac_ar_decoder import make_decoder
-
-LOG_FREQ = 10000
-
-
-def gaussian_logprob(noise, log_std):
-    """Compute Gaussian log probability."""
-    residual = (-0.5 * noise.pow(2) - log_std).sum(-1, keepdim=True)
-    return residual - 0.5 * np.log(2 * np.pi) * noise.size(-1)
-
-
-def squash(mu, pi, log_pi):
-    """Apply squashing function.
-    See appendix C from https://arxiv.org/pdf/1812.05905.pdf.
-    """
-    mu = torch.tanh(mu)
-    if pi is not None:
-        pi = torch.tanh(pi)
-    if log_pi is not None:
-        log_pi -= torch.log(F.relu(1 - pi.pow(2)) + 1e-6).sum(-1, keepdim=True)
-    return mu, pi, log_pi
+from models.sac_ae_decoder import make_decoder
 
 
 def weight_init(m):
@@ -48,212 +32,171 @@ def weight_init(m):
         nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
 
 
-class Actor(nn.Module):
-    """MLP actor network."""
-    def __init__(
-        self, obs_shape, action_shape, hidden_dim, encoder_type,
-        encoder_feature_dim, log_std_min, log_std_max, num_layers, num_filters
-    ):
-        super().__init__()
 
-        self.encoder = make_encoder(
-            encoder_type, obs_shape, encoder_feature_dim, num_layers,
+class SACAETorchModel(TorchModelV2, nn.Module):
+    """Extension of standard TorchModelV2 for SAC.
+
+    Data flow:
+        obs -> forward() -> model_out
+        model_out -> get_policy_output() -> pi(s)
+        model_out, actions -> get_q_values() -> Q(s, a)
+        model_out, actions -> get_twin_q_values() -> Q_twin(s, a)
+
+    Note that this class by itself is not a valid model unless you
+    implement forward() in a subclass."""
+
+    def __init__(self,
+                 obs_space,
+                 action_space,
+                 num_outputs,
+                 model_config,
+                 name,
+                 actor_hidden_activation="relu",
+                 actor_hiddens=(256, 256),
+                 critic_hidden_activation="relu",
+                 critic_hiddens=(256, 256),
+                 twin_q=False,
+                 initial_alpha=1.0,
+                 target_entropy=None,
+                 embed_dim = 256,
+                 augmentation=False,
+                 aug_num=2,
+                 max_shift=4,
+                 encoder_feature_dim=50,
+                 num_layers=4,
+                 num_filters=32,
+                 decoder_type='pixel',
+                 encoder_type='pixel',
+                 **kwargs):
+        """Initialize variables of this model.
+
+        Extra model kwargs:
+            actor_hidden_activation (str): activation for actor network
+            actor_hiddens (list): hidden layers sizes for actor network
+            critic_hidden_activation (str): activation for critic network
+            critic_hiddens (list): hidden layers sizes for critic network
+            twin_q (bool): build twin Q networks.
+            initial_alpha (float): The initial value for the to-be-optimized
+                alpha parameter (default: 1.0).
+            target_entropy (Optional[float]): An optional fixed value for the
+                SAC alpha loss term. None or "auto" for automatic calculation
+                of this value according to [1] (cont. actions) or [2]
+                (discrete actions).
+
+        Note that the core layers for forward() are not defined here, this
+        only defines the layers for the output heads. Those layers for
+        forward() should be defined in subclasses of SACModel.
+        """
+        TorchModelV2.__init__(self, obs_space, action_space,
+                                            num_outputs, model_config, name)
+        nn.Module.__init__(self)
+
+        self.action_dim = action_space.n
+        self.discrete = True
+        self.action_outs = q_outs = self.action_dim
+        self.action_ins = None  # No action inputs for the discrete case.
+        self.embed_dim = embed_dim
+    
+        h, w, c = obs_space.shape
+        shape = (c, h, w)
+        obs_shape = shape
+
+        # obs embedding 
+        conv_seqs = []
+        for out_channels in [16, 32, 32]:
+            conv_seq = ConvSequence(shape, out_channels)
+            shape = conv_seq.get_output_shape()
+            conv_seqs.append(conv_seq)
+        self.conv_seqs = nn.ModuleList(conv_seqs)
+        self.hidden_fc = nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=embed_dim)
+
+        # Build the policy network
+        # TODO: fix func input
+        self.actor_encoder = make_encoder(encoder_type, obs_shape, encoder_feature_dim, num_layers,
             num_filters
         )
 
-        self.log_std_min = log_std_min
-        self.log_std_max = log_std_max
-
-        self.trunk = nn.Sequential(
-            nn.Linear(self.encoder.feature_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, 2 * action_shape[0])
+        self.action_model = nn.Sequential()
+        # img -> embedding
+        ins = embed_dim
+        act = get_activation_fn(
+            actor_hidden_activation, framework="torch")
+        init = nn.init.xavier_uniform_
+        outs = self.actor_encoder.feature_dim
+        # embedding to autoencoder embed
+        self.action_model.add_module(
+                "action_{}".format(i), 
+                SlimFC(ins, outs, initializer=init, activation_fn=act)
+            )
+        ins = outs   
+        # add trunk model 
+        for i, n in enumerate(actor_hiddens):
+            self.action_model.add_module(
+                "action_{}".format(i), 
+                SlimFC(ins, n, initializer=init, activation_fn=act)
+            )
+            ins = n
+        self.action_model.add_module(
+            "action_out",
+            SlimFC(ins, self.action_outs, initializer=init, activation_fn=None)
         )
 
-        self.outputs = dict()
-        self.apply(weight_init)
+        # Build the Q-net(s), including target Q-net(s).
+        def build_q_net(name_):
+            self.critic_encoder = make_encoder(
+                encoder_type, obs_shape, encoder_feature_dim, num_layers,
+                num_filters
+            )
 
-    def forward(
-        self, obs, compute_pi=True, compute_log_pi=True, detach_encoder=False
-    ):
-        obs = self.encoder(obs, detach=detach_encoder)
+            act = get_activation_fn(
+                critic_hidden_activation, framework="torch")
+            init = nn.init.xavier_uniform_
+            # For discrete actions, only obs.
+            q_net = nn.Sequential()
+            ins = embed_dim
+            # embed to encoder embed
+            outs = self.critic_encoder.feature_dim
+            q_net.add_module(
+                    "{}_hidden_{}".format(name_, i),
+                    SlimFC(ins, outs, initializer=init, activation_fn=act)
+                )
+            ins = outs
 
-        mu, log_std = self.trunk(obs).chunk(2, dim=-1)
+            for i, n in enumerate(critic_hiddens):
+                q_net.add_module(
+                    "{}_hidden_{}".format(name_, i),
+                    SlimFC(ins, n, initializer=init, activation_fn=act)
+                )
+                ins = n
 
-        # constrain log_std inside [log_std_min, log_std_max]
-        log_std = torch.tanh(log_std)
-        log_std = self.log_std_min + 0.5 * (
-            self.log_std_max - self.log_std_min
-        ) * (log_std + 1)
+            q_net.add_module(
+                "{}_out".format(name_),
+                SlimFC(ins, q_outs, initializer=init, activation_fn=None)
+            )
+            return q_net
 
-        self.outputs['mu'] = mu
-        self.outputs['std'] = log_std.exp()
-
-        if compute_pi:
-            std = log_std.exp()
-            noise = torch.randn_like(mu)
-            pi = mu + noise * std
+        self.q_net = build_q_net("q")
+        if twin_q:
+            self.twin_q_net = build_q_net("twin_q")
         else:
-            pi = None
-            entropy = None
+            self.twin_q_net = None
 
-        if compute_log_pi:
-            log_pi = gaussian_logprob(noise, log_std)
-        else:
-            log_pi = None
+        # temperature tensor 
+        self.log_alpha = torch.tensor(
+            data=[np.log(initial_alpha)],
+            dtype=torch.float32,
+            requires_grad=True)
 
-        mu, pi, log_pi = squash(mu, pi, log_pi)
+        # Auto-calculate the target entropy.
+        if target_entropy is None or target_entropy == "auto":
+            # See hyperparams in [2] (README.md).
+            target_entropy = 0.98 * np.array(
+                -np.log(1.0 / action_space.n), dtype=np.float32)
+            
+        self.target_entropy = torch.tensor(
+            data=[target_entropy], dtype=torch.float32, requires_grad=False)
 
-        return mu, pi, log_pi, log_std
-
-    def log(self, L, step, log_freq=LOG_FREQ):
-        if step % log_freq != 0:
-            return
-
-        for k, v in self.outputs.items():
-            L.log_histogram('train_actor/%s_hist' % k, v, step)
-
-        L.log_param('train_actor/fc1', self.trunk[0], step)
-        L.log_param('train_actor/fc2', self.trunk[2], step)
-        L.log_param('train_actor/fc3', self.trunk[4], step)
-
-
-class QFunction(nn.Module):
-    """MLP for q-function."""
-    def __init__(self, obs_dim, action_dim, hidden_dim):
-        super().__init__()
-
-        self.trunk = nn.Sequential(
-            nn.Linear(obs_dim + action_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, 1)
-        )
-
-    def forward(self, obs, action):
-        assert obs.size(0) == action.size(0)
-
-        obs_action = torch.cat([obs, action], dim=1)
-        return self.trunk(obs_action)
-
-
-class Critic(nn.Module):
-    """Critic network, employes two q-functions."""
-    def __init__(
-        self, obs_shape, action_shape, hidden_dim, encoder_type,
-        encoder_feature_dim, num_layers, num_filters
-    ):
-        super().__init__()
-
-
-        self.encoder = make_encoder(
-            encoder_type, obs_shape, encoder_feature_dim, num_layers,
-            num_filters
-        )
-
-        self.Q1 = QFunction(
-            self.encoder.feature_dim, action_shape[0], hidden_dim
-        )
-        self.Q2 = QFunction(
-            self.encoder.feature_dim, action_shape[0], hidden_dim
-        )
-
-        self.outputs = dict()
-        self.apply(weight_init)
-
-    def forward(self, obs, action, detach_encoder=False):
-        # detach_encoder allows to stop gradient propogation to encoder
-        obs = self.encoder(obs, detach=detach_encoder)
-
-        q1 = self.Q1(obs, action)
-        q2 = self.Q2(obs, action)
-
-        self.outputs['q1'] = q1
-        self.outputs['q2'] = q2
-
-        return q1, q2
-
-    def log(self, L, step, log_freq=LOG_FREQ):
-        if step % log_freq != 0:
-            return
-
-        self.encoder.log(L, step, log_freq)
-
-        for k, v in self.outputs.items():
-            L.log_histogram('train_critic/%s_hist' % k, v, step)
-
-        for i in range(3):
-            L.log_param('train_critic/q1_fc%d' % i, self.Q1.trunk[i * 2], step)
-            L.log_param('train_critic/q2_fc%d' % i, self.Q2.trunk[i * 2], step)
-
-
-class SACAETorchModel(object):
-    """SAC+AE algorithm."""
-    def __init__(
-        self,
-        obs_shape,
-        action_shape,
-        device,
-        hidden_dim=256,
-        discount=0.99,
-        init_temperature=0.01,
-        alpha_lr=1e-3,
-        alpha_beta=0.9,
-        actor_lr=1e-3,
-        actor_beta=0.9,
-        actor_log_std_min=-10,
-        actor_log_std_max=2,
-        actor_update_freq=2,
-        critic_lr=1e-3,
-        critic_beta=0.9,
-        critic_tau=0.005,
-        critic_target_update_freq=2,
-        encoder_type='pixel',
-        encoder_feature_dim=50,
-        encoder_lr=1e-3,
-        encoder_tau=0.005,
-        decoder_type='pixel',
-        decoder_lr=1e-3,
-        decoder_update_freq=1,
-        decoder_latent_lambda=0.0,
-        decoder_weight_lambda=0.0,
-        num_layers=4,
-        num_filters=32
-    ):
-        self.device = device
-        self.discount = discount
-        self.critic_tau = critic_tau
-        self.encoder_tau = encoder_tau
-        self.actor_update_freq = actor_update_freq
-        self.critic_target_update_freq = critic_target_update_freq
-        self.decoder_update_freq = decoder_update_freq
-        self.decoder_latent_lambda = decoder_latent_lambda
-
-        self.actor = Actor(
-            obs_shape, action_shape, hidden_dim, encoder_type,
-            encoder_feature_dim, actor_log_std_min, actor_log_std_max,
-            num_layers, num_filters
-        ).to(device)
-
-        self.critic = Critic(
-            obs_shape, action_shape, hidden_dim, encoder_type,
-            encoder_feature_dim, num_layers, num_filters
-        ).to(device)
-
-        self.critic_target = Critic(
-            obs_shape, action_shape, hidden_dim, encoder_type,
-            encoder_feature_dim, num_layers, num_filters
-        ).to(device)
-
-        self.critic_target.load_state_dict(self.critic.state_dict())
-
-        # tie encoders between actor and critic
-        self.actor.encoder.copy_conv_weights_from(self.critic.encoder)
-
-        self.log_alpha = torch.tensor(np.log(init_temperature)).to(device)
-        self.log_alpha.requires_grad = True
-        # set target entropy to -|A|
-        self.target_entropy = -np.prod(action_shape)
-
+        # make decoder
         self.decoder = None
         if decoder_type != 'identity':
             # create decoder
@@ -263,184 +206,116 @@ class SACAETorchModel(object):
             ).to(device)
             self.decoder.apply(weight_init)
 
-            # optimizer for critic encoder for reconstruction loss
-            self.encoder_optimizer = torch.optim.Adam(
-                self.critic.encoder.parameters(), lr=encoder_lr
+
+        # NOTE: custom fields 
+        self.augmentation = augmentation
+        self.aug_num = aug_num
+        # NOTE: augmentation 
+        if augmentation:
+            obs_shape = obs_space.shape[-2]
+            self.trans = nn.Sequential(
+                nn.ReplicationPad2d(max_shift),
+                kornia.augmentation.RandomCrop((obs_shape, obs_shape))
             )
+    
+    @override(TorchModelV2)
+    def forward(self, input_dict, state, seq_lens):
+        """ return embedding value
+        """
+        x = self.get_embeddings(input_dict, state, seq_lens)
+        x = self.actor_encoder(x, detach=detach_encoder)
+        logits = self.get_policy_output(x)
+        # only need value during training 
+        if input_dict["is_training"]:
+            value = self.get_q_values(x)
+            self._value = value.squeeze(1)
+        return logits, state
 
-            # optimizer for decoder
-            self.decoder_optimizer = torch.optim.Adam(
-                self.decoder.parameters(),
-                lr=decoder_lr,
-                weight_decay=decoder_weight_lambda
-            )
+    @override(TorchModelV2)
+    def value_function(self):
+        assert self._value is not None, "must call forward() first"
+        return self._value
 
-        # optimizers
-        self.actor_optimizer = torch.optim.Adam(
-            self.actor.parameters(), lr=actor_lr, betas=(actor_beta, 0.999)
-        )
+    def get_embeddings(self, input_dict, state, seq_lens, permute=True):
+        """ encode observations 
+        """
+        x = input_dict["obs"].float()
+        x = x / 255.0  # scale to 0-1
+        if permute:
+            x = x.permute(0, 3, 1, 2)  # NHWC => NCHW
+        for conv_seq in self.conv_seqs:
+            x = conv_seq(x)
+        x = torch.flatten(x, start_dim=1)
+        x = nn.functional.relu(x)
+        x = self.hidden_fc(x)
+        x = nn.functional.relu(x)
+        return x
 
-        self.critic_optimizer = torch.optim.Adam(
-            self.critic.parameters(), lr=critic_lr, betas=(critic_beta, 0.999)
-        )
+    def get_q_values(self, model_out, actions=None):
+        """Return the Q estimates for the most recent forward pass.
 
-        self.log_alpha_optimizer = torch.optim.Adam(
-            [self.log_alpha], lr=alpha_lr, betas=(alpha_beta, 0.999)
-        )
+        This implements Q(s, a).
 
-        self.train()
-        self.critic_target.train()
+        Arguments:
+            model_out (Tensor): obs embeddings from the model layers, of shape
+                [BATCH_SIZE, num_outputs].
+            actions (Optional[Tensor]): Actions to return the Q-values for.
+                Shape: [BATCH_SIZE, action_dim]. If None (discrete action
+                case), return Q-values for all actions.
 
-    def train(self, training=True):
-        self.training = training
-        self.actor.train(training)
-        self.critic.train(training)
-        if self.decoder is not None:
-            self.decoder.train(training)
+        Returns:
+            tensor of shape [BATCH_SIZE].
+        """
+        if actions is not None:
+            return self.q_net(torch.cat([model_out, actions], -1))
+        else:
+            return self.q_net(model_out)
 
-    @property
-    def alpha(self):
-        return self.log_alpha.exp()
+    def get_twin_q_values(self, model_out, actions=None):
+        """Same as get_q_values but using the twin Q net.
 
-    def select_action(self, obs):
-        with torch.no_grad():
-            obs = torch.FloatTensor(obs).to(self.device)
-            obs = obs.unsqueeze(0)
-            mu, _, _, _ = self.actor(
-                obs, compute_pi=False, compute_log_pi=False
-            )
-            return mu.cpu().data.numpy().flatten()
+        This implements the twin Q(s, a).
 
-    def sample_action(self, obs):
-        with torch.no_grad():
-            obs = torch.FloatTensor(obs).to(self.device)
-            obs = obs.unsqueeze(0)
-            mu, pi, _, _ = self.actor(obs, compute_log_pi=False)
-            return pi.cpu().data.numpy().flatten()
+        Arguments:
+            model_out (Tensor): obs embeddings from the model layers, of shape
+                [BATCH_SIZE, num_outputs].
+            actions (Optional[Tensor]): Actions to return the Q-values for.
+                Shape: [BATCH_SIZE, action_dim]. If None (discrete action
+                case), return Q-values for all actions.
 
-    def update_critic(self, obs, action, reward, next_obs, not_done, L, step):
-        with torch.no_grad():
-            _, policy_action, log_pi, _ = self.actor(next_obs)
-            target_Q1, target_Q2 = self.critic_target(next_obs, policy_action)
-            target_V = torch.min(target_Q1,
-                                 target_Q2) - self.alpha.detach() * log_pi
-            target_Q = reward + (not_done * self.discount * target_V)
+        Returns:
+            tensor of shape [BATCH_SIZE].
+        """
+        if actions is not None:
+            return self.twin_q_net(torch.cat([model_out, actions], -1))
+        else:
+            return self.twin_q_net(model_out)
 
-        # get current Q estimates
-        current_Q1, current_Q2 = self.critic(obs, action)
-        critic_loss = F.mse_loss(current_Q1,
-                                 target_Q) + F.mse_loss(current_Q2, target_Q)
-        L.log('train_critic/loss', critic_loss, step)
+    def get_policy_output(self, model_out):
+        """Return the action output for the most recent forward pass.
 
+        This outputs the support for pi(s). For continuous action spaces, this
+        is the action directly. For discrete, is is the mean / std dev.
 
-        # Optimize the critic
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        self.critic_optimizer.step()
+        Arguments:
+            model_out (Tensor): obs embeddings from the model layers, of shape
+                [BATCH_SIZE, num_outputs].
 
-        self.critic.log(L, step)
+        Returns:
+            tensor of shape [BATCH_SIZE, action_out_size]
+        """
+        return self.action_model(model_out)
 
-    def update_actor_and_alpha(self, obs, L, step):
-        # detach encoder, so we don't update it with the actor loss
-        _, pi, log_pi, log_std = self.actor(obs, detach_encoder=True)
-        actor_Q1, actor_Q2 = self.critic(obs, pi, detach_encoder=True)
+    def policy_variables(self):
+        """Return the list of variables for the policy net."""
 
-        actor_Q = torch.min(actor_Q1, actor_Q2)
-        actor_loss = (self.alpha.detach() * log_pi - actor_Q).mean()
+        return list(self.action_model.parameters())
 
-        L.log('train_actor/loss', actor_loss, step)
-        L.log('train_actor/target_entropy', self.target_entropy, step)
-        entropy = 0.5 * log_std.shape[1] * (1.0 + np.log(2 * np.pi)
-                                            ) + log_std.sum(dim=-1)
-        L.log('train_actor/entropy', entropy.mean(), step)
+    def q_variables(self):
+        """Return the list of variables for Q / twin Q nets."""
 
-        # optimize the actor
-        self.actor_optimizer.zero_grad()
-        actor_loss.backward()
-        self.actor_optimizer.step()
+        return list(self.q_net.parameters()) + \
+            (list(self.twin_q_net.parameters()) if self.twin_q_net else [])
 
-        self.actor.log(L, step)
-
-        self.log_alpha_optimizer.zero_grad()
-        alpha_loss = (self.alpha *
-                      (-log_pi - self.target_entropy).detach()).mean()
-        L.log('train_alpha/loss', alpha_loss, step)
-        L.log('train_alpha/value', self.alpha, step)
-        alpha_loss.backward()
-        self.log_alpha_optimizer.step()
-
-    def update_decoder(self, obs, target_obs, L, step):
-        h = self.critic.encoder(obs)
-
-        if target_obs.dim() == 4:
-            # preprocess images to be in [-0.5, 0.5] range
-            target_obs = utils.preprocess_obs(target_obs)
-        rec_obs = self.decoder(h)
-        rec_loss = F.mse_loss(target_obs, rec_obs)
-
-        # add L2 penalty on latent representation
-        # see https://arxiv.org/pdf/1903.12436.pdf
-        latent_loss = (0.5 * h.pow(2).sum(1)).mean()
-
-        loss = rec_loss + self.decoder_latent_lambda * latent_loss
-        self.encoder_optimizer.zero_grad()
-        self.decoder_optimizer.zero_grad()
-        loss.backward()
-
-        self.encoder_optimizer.step()
-        self.decoder_optimizer.step()
-        L.log('train_ae/ae_loss', loss, step)
-
-        self.decoder.log(L, step, log_freq=LOG_FREQ)
-
-    def update(self, replay_buffer, L, step):
-        obs, action, reward, next_obs, not_done = replay_buffer.sample()
-
-        L.log('train/batch_reward', reward.mean(), step)
-
-        self.update_critic(obs, action, reward, next_obs, not_done, L, step)
-
-        if step % self.actor_update_freq == 0:
-            self.update_actor_and_alpha(obs, L, step)
-
-        if step % self.critic_target_update_freq == 0:
-            utils.soft_update_params(
-                self.critic.Q1, self.critic_target.Q1, self.critic_tau
-            )
-            utils.soft_update_params(
-                self.critic.Q2, self.critic_target.Q2, self.critic_tau
-            )
-            utils.soft_update_params(
-                self.critic.encoder, self.critic_target.encoder,
-                self.encoder_tau
-            )
-
-        if self.decoder is not None and step % self.decoder_update_freq == 0:
-            self.update_decoder(obs, obs, L, step)
-
-    def save(self, model_dir, step):
-        torch.save(
-            self.actor.state_dict(), '%s/actor_%s.pt' % (model_dir, step)
-        )
-        torch.save(
-            self.critic.state_dict(), '%s/critic_%s.pt' % (model_dir, step)
-        )
-        if self.decoder is not None:
-            torch.save(
-                self.decoder.state_dict(),
-                '%s/decoder_%s.pt' % (model_dir, step)
-            )
-
-    def load(self, model_dir, step):
-        self.actor.load_state_dict(
-            torch.load('%s/actor_%s.pt' % (model_dir, step))
-        )
-        self.critic.load_state_dict(
-            torch.load('%s/critic_%s.pt' % (model_dir, step))
-        )
-        if self.decoder is not None:
-            self.decoder.load_state_dict(
-                torch.load('%s/decoder_%s.pt' % (model_dir, step))
-            )
-
+# Register model in ModelCatalog
 ModelCatalog.register_custom_model("sac_ae", SACAETorchModel)
