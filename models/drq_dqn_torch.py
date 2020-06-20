@@ -220,8 +220,9 @@ class DrqDQNTorchModel(TorchModelV2, nn.Module):
         """ return embedding value
         """
         x = self.get_embeddings(input_dict, state, seq_lens)
-        logits = self.get_policy_output(x)
-        return logits, state
+        # logits = self.get_policy_output(x)
+        # return logits, state
+        return x, state
 
     def get_embeddings(self, input_dict, state, seq_lens, permute=True):
         """ encode observations 
