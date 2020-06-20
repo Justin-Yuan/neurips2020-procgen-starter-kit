@@ -3,6 +3,7 @@ import numpy as np
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.models import ModelCatalog
 from ray.rllib.utils import try_import_torch
+from ray.rllib.utils.annotations import override
 
 torch, nn = try_import_torch()
 
@@ -115,7 +116,7 @@ class DrqDQNTorchModel(TorchModelV2, nn.Module):
             # pass (UGLY HACK!!!)
             # NOTE: manually adding q value (no dueling) branch following embedding
             for i, n in enumerate(q_hiddens):
-                 advantage_module.add_module("Q_{}".format(i),
+                advantage_module.add_module("Q_{}".format(i),
                                             nn.Linear(ins, n))
                 if activation == "relu":
                     advantage_module.add_module("Q_act_{}".format(i),
@@ -220,8 +221,9 @@ class DrqDQNTorchModel(TorchModelV2, nn.Module):
         """ return embedding value
         """
         x = self.get_embeddings(input_dict, state, seq_lens)
-        logits = self.get_policy_output(x)
-        return logits, state
+        # logits = self.get_policy_output(x)
+        # return logits, state
+        return x, state
 
     def get_embeddings(self, input_dict, state, seq_lens, permute=True):
         """ encode observations 

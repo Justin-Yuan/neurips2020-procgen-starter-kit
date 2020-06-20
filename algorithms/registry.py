@@ -33,7 +33,8 @@ def _import_drq_rainbow_agent():
     from .drq_agent.rainbow_trainer import DrqRainbowTrainer
     return DrqRainbowTrainer
 
-    
+def _import_sac_ae_agent():
+    from .sac_ae_agent.sac_ae_trainer import SACAETrainer
 # def _import_curl_agent():
 #     from .curl_agent.curl_trainer import CurlTrainer
 #     return CurlTrainer
@@ -50,6 +51,7 @@ CUSTOM_ALGORITHMS = {
     "custom/DrqPPOTrainer": _import_drq_ppo_agent,
     "custom/DrqDQNTrainer": _import_drq_dqn_agent,
     "custom/DrqRainbowTrainer": _import_drq_rainbow_agent,
+    "custom/SACAETrainer": _import_sac_ae_agent,
     # "custom/CurlTrainer": _import_curl_agent,
     # "custom/DreamerTrainer": _import_dreamer_agent,
 }

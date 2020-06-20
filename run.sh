@@ -6,7 +6,8 @@ set -e
 #########################################
 
 # export EXPERIMENT_DEFAULT="experiments/impala-baseline.yaml"
-export EXPERIMENT_DEFAULT="experiments/procgen-starter-example.yaml"
+# export EXPERIMENT_DEFAULT="experiments/procgen-starter-example.yaml"
+export EXPERIMENT_DEFAULT="experiments/drq_ppo.yaml"
 export EXPERIMENT=${EXPERIMENT:-$EXPERIMENT_DEFAULT}
 
 if [[ -z $AICROWD_IS_GRADING ]]; then

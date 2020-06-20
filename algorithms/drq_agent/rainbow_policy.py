@@ -64,7 +64,7 @@ def build_q_model_and_distribution(policy, obs_space, action_space, config):
         num_outputs=num_outputs,
         model_config=config["model"],
         # name=Q_SCOPE,
-        name="dqn_model"
+        name="dqn_model",
         dueling=config["dueling"],
         q_hiddens=config["hiddens"],
         use_noisy=config["noisy"],
@@ -87,7 +87,7 @@ def build_q_model_and_distribution(policy, obs_space, action_space, config):
         framework="torch",
         model_interface=DQNTorchModel,
         # name=Q_TARGET_SCOPE,
-        name="target_dqn_model"
+        name="target_dqn_model",
         dueling=config["dueling"],
         q_hiddens=config["hiddens"],
         use_noisy=config["noisy"],
