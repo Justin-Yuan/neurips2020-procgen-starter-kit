@@ -17,8 +17,8 @@ from ray.rllib.utils import try_import_torch
 from ray.rllib.models import ModelCatalog
 from ray.rllib.utils.error import UnsupportedSpaceException
 from models.sac_ae_torch import SACAETorchModel
-from ray.rllib.agents.sac.sac_torch_policy import actor_critic_loss
-
+# from ray.rllib.agents.sac.sac_torch_policy import actor_critic_loss
+# from algorithms.sac_ae_agent.sac_ae_policy import actor_critic_loss
 
 torch, nn = try_import_torch()
 F = nn.functional
@@ -148,7 +148,7 @@ def action_distribution_fn(policy,
 #####################################   Loss func   #####################################################
 #######################################################################################################
 
-def drq_actor_critic_loss(policy, model, _, train_batch):
+def actor_critic_loss(policy, model, _, train_batch):
     # Should be True only for debugging purposes (e.g. test cases)!
     deterministic = policy.config["_deterministic_loss"]
 
@@ -199,20 +199,22 @@ def drq_actor_critic_loss(policy, model, _, train_batch):
         # }, [], None, permute=False)
         # target_model_out_tp1_augs.append(target_model_out_tp1)
 
-    model_out_t, _ = model({
+    detach_encoder = False
+
+    model_out_t, _ = model.actor_encoder({
         "obs": train_batch[SampleBatch.CUR_OBS],
         "is_training": True,
-    }, [], None)
+    }, detach=detach_encoder)
 
-    model_out_tp1, _ = model({
+    model_out_tp1, _ = model.actor_encoder({
         "obs": train_batch[SampleBatch.NEXT_OBS],
         "is_training": True,
-    }, [], None)
+    }, detach=detach_encoder)
 
-    target_model_out_tp1, _ = policy.target_model({
+    target_model_out_tp1, _ = policy.target_model.actor_encoder({
         "obs": train_batch[SampleBatch.NEXT_OBS],
         "is_training": True,
-    }, [], None)
+    }, detach=detach_encoder)
     ################################################################################################
 
     alpha = torch.exp(model.log_alpha)
@@ -602,20 +604,20 @@ def optimizer_fn(policy, config):
     )
 
     # optimizer for critic encoder for reconstruction loss
-    self.encoder_optimizer = torch.optim.Adam(
-        self.critic.encoder.parameters(), lr=config["optimization"]["encoder_lr"]
+    policy.encoder_optim = torch.optim.Adam(
+        policy.model.critic_encoder.parameters(), lr=config["optimization"]["encoder_learning_rate"]
     )
 
     # optimizer for decoder for reconstruction loss
-    self.decoder_optimizer = torch.optim.Adam(
-        self.decoder.parameters(),
-        lr=config["optimization"]["decoder_lr"],
-        weight_decay=config["optimization"]["decoder_weight_lambda"]
+    policy.decoder_optim = torch.optim.Adam(
+        policy.model.decoder.parameters(),
+        lr=config["optimization"]["decoder_learning_rate"],
+        weight_decay=config["decoder_weight_lambda"]
     )
 
     return tuple([policy.actor_optim] + policy.critic_optims +
-                 [policy.alpha_optim] + policy.encoder_optims + 
-                 policy.decoder_optims)
+                 [policy.alpha_optim] + [policy.encoder_optim] + 
+                 [policy.decoder_optim])
 
 
 class ComputeTDErrorMixin:

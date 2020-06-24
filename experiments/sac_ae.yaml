@@ -167,11 +167,7 @@ drq_sac:
         augmentation: False
         aug_num: 2
         max_shift: 4 
-        encoder_lr: 0.001
-        decoder_lr: 0.001
-        decoder_update_freq: 1 
-        decoder_latent_lambda: 0.0
-        decoder_weight_lambda: 0.0
+      
 
         ################################################
         ################################################

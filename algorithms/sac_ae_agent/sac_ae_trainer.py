@@ -2,9 +2,9 @@ from ray.rllib.agents.trainer import with_common_config
 from ray.rllib.agents.dqn.dqn import GenericOffPolicyTrainer
 from ray.rllib.agents.sac.sac_torch_policy import SACTorchPolicy
 from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
-
+from ray.rllib.agents.trainer_template import build_trainer
 # custom imports
-from algorithms.sac_ae_agent.sac_ae_policy import NoAugSACAETorchPolicy, DrqSACAETorchPolicy
+from algorithms.sac_ae_agent.sac_ae_policy import SACAETorchPolicy, DrqSACAETorchPolicy
 
 
 #######################################################################################################
@@ -75,6 +75,10 @@ DEFAULT_CONFIG = with_common_config({
     "prioritized_replay_eps": 1e-6,
     "prioritized_replay_beta_annealing_timesteps": 20000,
     "final_prioritized_replay_beta": 0.4,
+    # ae configs 
+    "decoder_update_freq": 1, 
+    "decoder_latent_lambda": 0.0,
+    "decoder_weight_lambda": 0.0,
     # Whether to LZ4 compress observations
     "compress_observations": False,
     # If set, this will fix the ratio of sampled to replayed timesteps.
@@ -87,6 +91,9 @@ DEFAULT_CONFIG = with_common_config({
         "actor_learning_rate": 3e-4,
         "critic_learning_rate": 3e-4,
         "entropy_learning_rate": 3e-4,
+        "encoder_learning_rate": 0.001,
+        "decoder_learning_rate": 0.001,
+       
     },
     # If not None, clip gradients during optimization at this value.
     "grad_clip": None,
@@ -181,10 +188,11 @@ def validate_config(config):
 #######################################################################################################
 
 
-DrqSACTrainer = GenericOffPolicyTrainer.with_updates(
-    name="DrqSAC",
+# SACAETrainer = GenericOffPolicyTrainer.with_updates(
+SACAETrainer = build_trainer(
+    name="SACAE",
     default_config=DEFAULT_CONFIG,
     validate_config=validate_config,
-    default_policy=DrqSACAETorchPolicy,
+    default_policy=SACAETorchPolicy,
     get_policy_class=get_policy_class,
 )

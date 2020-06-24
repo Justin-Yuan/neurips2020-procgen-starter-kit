@@ -91,6 +91,7 @@ def load_algorithms(CUSTOM_ALGORITHMS):
     
     for _custom_algorithm_name in CUSTOM_ALGORITHMS:
         _class = CUSTOM_ALGORITHMS[_custom_algorithm_name]()
+        print(_custom_algorithm_name, _class)
         registry.register_trainable(
             _custom_algorithm_name,
             _class)

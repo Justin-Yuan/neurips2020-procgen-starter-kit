@@ -35,6 +35,7 @@ def _import_drq_rainbow_agent():
 
 def _import_sac_ae_agent():
     from .sac_ae_agent.sac_ae_trainer import SACAETrainer
+    return SACAETrainer
 # def _import_curl_agent():
 #     from .curl_agent.curl_trainer import CurlTrainer
 #     return CurlTrainer

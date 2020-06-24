@@ -58,7 +58,7 @@ class SACAETorchModel(TorchModelV2, nn.Module):
                  twin_q=False,
                  initial_alpha=1.0,
                  target_entropy=None,
-                 embed_dim = 256,
+                 embed_dim = 50,
                  augmentation=False,
                  aug_num=2,
                  max_shift=4,
@@ -102,13 +102,13 @@ class SACAETorchModel(TorchModelV2, nn.Module):
         obs_shape = shape
 
         # obs embedding 
-        conv_seqs = []
-        for out_channels in [16, 32, 32]:
-            conv_seq = ConvSequence(shape, out_channels)
-            shape = conv_seq.get_output_shape()
-            conv_seqs.append(conv_seq)
-        self.conv_seqs = nn.ModuleList(conv_seqs)
-        self.hidden_fc = nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=embed_dim)
+        # conv_seqs = []
+        # for out_channels in [16, 32, 32]:
+        #     conv_seq = ConvSequence(shape, out_channels)
+        #     shape = conv_seq.get_output_shape()
+        #     conv_seqs.append(conv_seq)
+        # self.conv_seqs = nn.ModuleList(conv_seqs)
+        # self.hidden_fc = nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=embed_dim)
 
         # Build the policy network
         # TODO: fix func input
@@ -125,7 +125,7 @@ class SACAETorchModel(TorchModelV2, nn.Module):
         outs = self.actor_encoder.feature_dim
         # embedding to autoencoder embed
         self.action_model.add_module(
-                "action_{}".format(i), 
+                "action_{}".format('e'), 
                 SlimFC(ins, outs, initializer=init, activation_fn=act)
             )
         ins = outs   
@@ -157,7 +157,7 @@ class SACAETorchModel(TorchModelV2, nn.Module):
             # embed to encoder embed
             outs = self.critic_encoder.feature_dim
             q_net.add_module(
-                    "{}_hidden_{}".format(name_, i),
+                    "{}_hidden_{}".format(name_, "e"),
                     SlimFC(ins, outs, initializer=init, activation_fn=act)
                 )
             ins = outs
@@ -196,6 +196,7 @@ class SACAETorchModel(TorchModelV2, nn.Module):
         self.target_entropy = torch.tensor(
             data=[target_entropy], dtype=torch.float32, requires_grad=False)
 
+        # device = 0
         # make decoder
         self.decoder = None
         if decoder_type != 'identity':
@@ -203,7 +204,7 @@ class SACAETorchModel(TorchModelV2, nn.Module):
             self.decoder = make_decoder(
                 decoder_type, obs_shape, encoder_feature_dim, num_layers,
                 num_filters
-            ).to(device)
+            )
             self.decoder.apply(weight_init)
 
 
@@ -222,8 +223,9 @@ class SACAETorchModel(TorchModelV2, nn.Module):
     def forward(self, input_dict, state, seq_lens):
         """ return embedding value
         """
-        x = self.get_embeddings(input_dict, state, seq_lens)
-        x = self.actor_encoder(x, detach=detach_encoder)
+        detach_encoder = True
+        # x = self.get_embeddings(input_dict, state, seq_lens)
+        x = self.actor_encoder(input_dict["obs"].permute(0,3,1,2), detach=detach_encoder)
         logits = self.get_policy_output(x)
         # only need value during training 
         if input_dict["is_training"]:
