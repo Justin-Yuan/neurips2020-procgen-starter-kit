@@ -178,21 +178,21 @@ def drq_actor_critic_loss(policy, model, _, train_batch):
             train_batch[SampleBatch.NEXT_OBS].permute(0,3,1,2).float())
 
         # cur obs embeddings
-        model_out_t = model.get_embeddings({
+        model_out_t, _ = model.get_embeddings({
             "obs": augCurSampleBatch,
             "is_training": True,
         }, [], None, permute=False)
         model_out_t_augs.append(model_out_t)
 
         # next obs embeddings 
-        model_out_tp1 = model.get_embeddings({
+        model_out_tp1, _ = model.get_embeddings({
             "obs": augNextSampleBatch,
             "is_training": True,
         }, [], None, permute=False)
         model_out_tp1_augs.append(model_out_tp1)
 
         # target next obs embeddings 
-        target_model_out_tp1 = policy.target_model.get_embeddings({
+        target_model_out_tp1, _ = policy.target_model.get_embeddings({
             "obs": augNextSampleBatch,
             "is_training": True,
         }, [], None, permute=False)

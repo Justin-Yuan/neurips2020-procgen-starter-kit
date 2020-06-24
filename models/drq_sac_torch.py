@@ -156,7 +156,7 @@ class DrqSACTorchModel(TorchModelV2, nn.Module):
     def forward(self, input_dict, state, seq_lens):
         """ return embedding value
         """
-        x = self.get_embeddings(input_dict, state, seq_lens)
+        x, state = self.get_embeddings(input_dict, state, seq_lens)
         logits = self.get_policy_output(x)
         # only need value during training 
         if input_dict["is_training"]:
@@ -182,7 +182,7 @@ class DrqSACTorchModel(TorchModelV2, nn.Module):
         x = nn.functional.relu(x)
         x = self.hidden_fc(x)
         x = nn.functional.relu(x)
-        return x
+        return x, state
 
     def get_q_values(self, model_out, actions=None):
         """Return the Q estimates for the most recent forward pass.
