@@ -6,8 +6,7 @@ from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 
 # custom imports  
 from ray.rllib.agents.dqn.dqn import GenericOffPolicyTrainer
-from algorithms.drq_agent.rainbow_policy import NoAugRainbowTorchPolicy, DrqRainbowTorchPolicy
-
+from algorithms.drq.dqn.dqn_policy import NoAugDQNTorchPolicy, DrqDQNTorchPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -236,55 +235,34 @@ def validate_config(config):
                              "replay_sequence_length > 1.")
 
 
-def get_rainbow_policy_class(config):    
+def get_dqn_policy_class(config):
+    ################################################################################################
+    # if config["framework"] == "torch":
+    #     from ray.rllib.agents.dqn.dqn_torch_policy import DQNTorchPolicy
+    #     return DQNTorchPolicy
+    # else:
+    #     return DQNTFPolicy
+    
+    # NOTE: switch between policy with/without input augmentations
     if config["augmentation"] == True:
-        return DrqRainbowTorchPolicy
+        return DrqDQNTorchPolicy
     else:
-        return NoAugRainbowTorchPolicy
-
+        return NoAugDQNTorchPolicy
+    ################################################################################################
 
 
 #######################################################################################################
 #####################################   Trainers   #####################################################
 #######################################################################################################
 
-"""
-# original rainbow (https://arxiv.org/pdf/1710.02298.pdf)
-num_atoms: 51   #(min max +-10)
-noisy, double_q, dueling: True
-n_steps: 3
-learning_starts: 1000
-
-# ray rllib rainbow (https://github.com/ray-project/ray/blob/master/rllib/agents/dqn/tests/test_dqn.py)
-num_atoms: 10 
-noisy, double_q, dueling: True
-n_steps: 5
-learning_starts: 1000
-
-# efficient rainbow (https://arxiv.org/pdf/1906.05243.pdf)
-num_atoms: 51
-noisy, double_q, dueling: True
-n_step: 20
-learning_starts: 1600
-"""
-
-# here we use efficient rainbow with partial params from rllib rainbow
-rainbow_config = DEFAULT_CONFIG.copy()
-rainbow_config["num_atoms"] = 51
-rainbow_config["noisy"] = True
-rainbow_config["double_q"] = True
-rainbow_config["dueling"] = True
-rainbow_config["n_step"] = 20
-rainbow_config["learning_starts"] = 1600
-
-
-DrqRainbowTrainer = GenericOffPolicyTrainer.with_updates(
-    name="DrqRainbow",
-    default_config=rainbow_config,
+DrqDQNTrainer = GenericOffPolicyTrainer.with_updates(
+    name="DrqDQN",
+    default_config=DEFAULT_CONFIG,
     validate_config=validate_config,
-    default_policy=DrqRainbowTorchPolicy,
-    get_policy_class=get_rainbow_policy_class,
+    default_policy=DrqDQNTorchPolicy,
+    get_policy_class=get_dqn_policy_class,
 )
+
 
 
 

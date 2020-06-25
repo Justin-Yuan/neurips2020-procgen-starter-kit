@@ -18,10 +18,10 @@ from ray.rllib.utils.torch_ops import sequence_mask
 from ray.rllib.utils import try_import_torch
 
 # custom imports 
-from models.drq_ppo_torch import DrqPPOTorchModel
 from ray.rllib.models import ModelCatalog
 from ray.rllib.evaluation.postprocessing import Postprocessing, compute_advantages
 from ray.rllib.agents.ppo.ppo_torch_policy import ppo_surrogate_loss
+from algorithms.drq.ppo.ppo_model import DrqPPOTorchModel
 
 torch, nn = try_import_torch()
 

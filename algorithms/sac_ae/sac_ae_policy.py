@@ -17,9 +17,11 @@ from ray.rllib.utils import try_import_torch
 # custom imports 
 from ray.rllib.models import ModelCatalog
 from ray.rllib.utils.error import UnsupportedSpaceException
-from models.sac_ae_torch import SACAETorchModel
+# from models.sac_ae_torch import SACAETorchModel
 # from ray.rllib.agents.sac.sac_torch_policy import actor_critic_loss
-# from algorithms.sac_ae_agent.sac_ae_policy import actor_critic_loss
+from algorithms.sac_ae.sac_ae_policy import actor_critic_loss
+from algorithms.sac_ae.sac_ae_model import SACAETorchModel
+
 
 torch, nn = try_import_torch()
 F = nn.functional

@@ -11,7 +11,7 @@ from ray.rllib.execution.metric_ops import StandardMetricsReporting
 from ray.rllib.utils import try_import_tf
 
 # custom imports
-from algorithms.drq_agent.ppo_policy import NoAugPPOTorchPolicy, DrqPPOTorchPolicy
+from algorithms.drq.ppo.ppo_policy import NoAugPPOTorchPolicy, DrqPPOTorchPolicy
 
 tf = try_import_tf()
 

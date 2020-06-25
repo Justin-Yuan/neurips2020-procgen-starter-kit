@@ -18,27 +18,33 @@ def _import_custom_random_agent():
     return CustomRandomAgent
 
 def _import_drq_sac_agent():
-    from .drq_agent.sac_trainer import DrqSACTrainer
+    from .drq.sac.sac_trainer import DrqSACTrainer
     return DrqSACTrainer
 
 def _import_drq_ppo_agent():
-    from .drq_agent.ppo_trainer import DrqPPOTrainer
+    from .drq.ppo.ppo_trainer import DrqPPOTrainer
     return DrqPPOTrainer
 
 def _import_drq_dqn_agent():
-    from .drq_agent.dqn_trainer import DrqDQNTrainer
+    from .drq.dqn.dqn_trainer import DrqDQNTrainer
     return DrqDQNTrainer
 
 def _import_drq_rainbow_agent():
-    from .drq_agent.rainbow_trainer import DrqRainbowTrainer
+    from .drq.rainbow.rainbow_trainer import DrqRainbowTrainer
     return DrqRainbowTrainer
 
 def _import_sac_ae_agent():
-    from .sac_ae_agent.sac_ae_trainer import SACAETrainer
+    from .sac_ae.sac_ae_trainer import SACAETrainer
     return SACAETrainer
-# def _import_curl_agent():
-#     from .curl_agent.curl_trainer import CurlTrainer
-#     return CurlTrainer
+
+# def _import_curl_sac_agent():
+#     from .curl.sac.sac_trainer import CurlSACTrainer
+#     return CurlSACTrainer
+
+# def _import_curl_rainbow_agent():
+#     from .curl.rainbow.rainbow_trainer import CurlRainbowTrainer
+#     return CurlRainbowTrainer
+
 
 # def _import_dreamer_agent():
 #     from .dreamer_agent.dreamer_trainer import DreamerTrainer
@@ -53,6 +59,7 @@ CUSTOM_ALGORITHMS = {
     "custom/DrqDQNTrainer": _import_drq_dqn_agent,
     "custom/DrqRainbowTrainer": _import_drq_rainbow_agent,
     "custom/SACAETrainer": _import_sac_ae_agent,
-    # "custom/CurlTrainer": _import_curl_agent,
+    # "custom/CurlSACTrainer": _import_curl_sac_agent,
+    # "custom/CurlRainbowTrainer": _import_curl_rainbow_agent,
     # "custom/DreamerTrainer": _import_dreamer_agent,
 }

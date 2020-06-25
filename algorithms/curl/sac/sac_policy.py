@@ -13,11 +13,13 @@ from ray.rllib.models.torch.torch_action_dist import (
     TorchCategorical, TorchSquashedGaussian, TorchDiagGaussian, TorchBeta)
 from ray.rllib.utils import try_import_torch
 
+# customs 
 from ray.rllib.models import ModelCatalog
-# from ray.rllib.agents.sac.sac_tf_model import SACTFModel
-# from ray.rllib.agents.sac.sac_torch_model import SACTorchModel
 from ray.rllib.utils.error import UnsupportedSpaceException
-from models.curl_sac_torch import CurlSACTorchModel
+from ray.rllib.utils.annotations import override
+from ray.rllib.policy.policy import Policy, LEARNER_STATS_KEY
+from ray.rllib.policy.torch_policy import TorchPolicy
+from algorithms.curl.sac.sac_model import CurlSACTorchModel
 
 
 torch, nn = try_import_torch()
@@ -396,9 +398,75 @@ class CurlMixin:
     def __init__(self, config):
         pass 
 
-    
+    @override(TorchPolicy)
+    def learn_on_batch(self, postprocessed_batch):
+        """ CURL-style updates 
+        """
+        # convert to UsageTrackingDict from MultiagentBatch
+        train_batch = self._lazy_tensor_dict(postprocessed_batch)
+
+        loss_out = self._loss(self, self.model, self.dist_class, train_batch))
+        critic_loss, actor_loss = loss_out
+
+        # collect backprop stats
+        grad_info = {"allreduce_latency": 0.0}
+
+        # loop through each loss and optimizer
+        grads_critic = self._update_critic(critic_loss)
+        grads_actor = self._update_actor(actor_loss)
 
 
+        for i, opt in enumerate(self._optimizers):
+            # Erase gradients in all vars of this optimizer.
+            opt.zero_grad()
+            # Recompute gradients of loss over all variables.
+            loss_out[i].backward(retain_graph=(i < len(self._optimizers) - 1))
+            grad_info.update(self.extra_grad_process(opt, loss_out[i]))
+
+            latency = self.average_grad(opt)
+            grad_info["allreduce_latency"] += latency
+
+            # Step the optimizer.
+            opt.step()
+
+
+        grad_info["allreduce_latency"] /= len(self._optimizers)
+        grad_info.update(self.extra_grad_info(train_batch))
+        return {LEARNER_STATS_KEY: grad_info}
+
+    def average_grad(self, opt):
+        """ for distributed setting, average gradients withh allreduce 
+        Input:
+            - opt: optimizer 
+        Output:
+            - latency
+        """
+        if self.distributed_world_size:
+            grads = []
+            for param_group in opt.param_groups:
+                for p in param_group["params"]:
+                    if p.grad is not None:
+                        grads.append(p.grad)
+
+            start = time.time()
+            if torch.cuda.is_available():
+                # Sadly, allreduce_coalesced does not work with CUDA yet.
+                for g in grads:
+                    torch.distributed.all_reduce(
+                        g, op=torch.distributed.ReduceOp.SUM)
+            else:
+                torch.distributed.all_reduce_coalesced(
+                    grads, op=torch.distributed.ReduceOp.SUM)
+
+            for param_group in opt.param_groups:
+                for p in param_group["params"]:
+                    if p.grad is not None:
+                        p.grad /= self.distributed_world_size
+
+            latency = time.time() - start
+            return latency
+        else:
+            return 0
 
 
 def setup_late_mixins(policy, obs_space, action_space, config):
@@ -407,6 +475,7 @@ def setup_late_mixins(policy, obs_space, action_space, config):
     policy.model.target_entropy = policy.model.target_entropy.to(policy.device)
     ComputeTDErrorMixin.__init__(policy)
     TargetNetworkMixin.__init__(policy)
+    CurlMixin.__init__(policy)
 
 
 #######################################################################################################
@@ -418,12 +487,14 @@ CurlSACTorchPolicy = build_torch_policy(
     loss_fn=actor_critic_loss,
     get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
     stats_fn=stats,
+    # called in a torch.no_grad scope, calls loss func again to update td error 
     postprocess_fn=postprocess_trajectory,
+    # will clip grad in learn_on_batch if grad_clip is not None in config 
     extra_grad_process_fn=apply_grad_clipping,
     optimizer_fn=optimizer_fn,
     after_init=setup_late_mixins,
     make_model_and_action_dist=build_curl_sac_model_and_action_dist,
-    mixins=[TargetNetworkMixin, ComputeTDErrorMixin],
+    mixins=[TargetNetworkMixin, ComputeTDErrorMixin, CurlMixin],
     action_distribution_fn=action_distribution_fn,
 )
 
@@ -434,53 +505,5 @@ CurlSACTorchPolicy = build_torch_policy(
 # policy.global_timestep
 
 # trainer.optimizer.num_steps_sampled
-from ray.rllib.agents.sac.sac import DEFAULT_CONFIG
 
 
-def build_curl_sac_model(obs_space, action_space, config):
-    pass 
-
-
-
-
-def get_dist_class(config, action_space):
-    if isinstance(action_space, Discrete):
-        return TorchCategorical
-    else:
-        if config["normalize_actions"]:
-            return TorchSquashedGaussian if \
-                not config["_use_beta_distribution"] else TorchBeta
-        else:
-            return TorchDiagGaussian
-
-
-
-def actor_critic_loss():
-    pass 
-
-
-class CurlSACTorchPolicy(TorchPolicy):
-    """ extended policy for Contrastive Unsupervised Representations for RL
-    """
-    def __init__(self, obs_space, action_space, config):
-        config = dict(DEFAULT_CONFIG, **config)
-        self.config = config
-
-        # model 
-        self.model = build_curl_sac_model(obs_space, action_space, config)
-        # action distrib 
-        dist_class = get_dist_class(config, action_space)
-
-        TorchPolicy.__init__(
-            self,
-            observation_space=obs_space,
-            action_space=action_space,
-            config=config,
-            model=self.model,
-            loss=loss_fn,
-            action_distribution_class=dist_class,
-            action_sampler_fn=action_sampler_fn,
-            action_distribution_fn=action_distribution_fn,
-            max_seq_len=config["model"]["max_seq_len"],
-            get_batch_divisibility_req=get_batch_divisibility_req,
-        )

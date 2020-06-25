@@ -23,8 +23,7 @@ if nn:
 
 # customs 
 from ray.rllib.agents.dqn.dqn_torch_policy import QLoss, build_q_losses, compute_q_values
-from models.drq_dqn_torch import DrqDQNTorchModel
-
+from algorithms.drq.dqn.dqn_model import DrqDQNTorchModel
 
 #######################################################################################################
 #####################################   Models   #####################################################

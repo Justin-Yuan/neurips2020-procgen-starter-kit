@@ -3,7 +3,7 @@ from ray.rllib.agents.dqn.dqn import GenericOffPolicyTrainer
 from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 
 # from ray.rllib.agents.sac.sac_torch_policy import SACTorchPolicy
-from algorithms.curl_agent.curl_policy import CurlSACTorchPolicy
+from algorithms.curl.sac.sac_policy import CurlSACTorchPolicy
 
 
 OPTIMIZER_SHARED_CONFIGS = [

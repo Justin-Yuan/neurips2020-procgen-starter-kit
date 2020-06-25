@@ -22,7 +22,7 @@ if nn:
     F = nn.functional
 
 # customs 
-from models.drq_rainbow_torch import DrqRainbowTorchModel
+from algorithms.drq.rainbow.rainbow_model import DrqRainbowTorchModel
 
 
 #######################################################################################################

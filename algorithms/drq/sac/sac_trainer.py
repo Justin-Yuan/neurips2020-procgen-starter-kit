@@ -4,7 +4,7 @@ from ray.rllib.agents.sac.sac_tf_policy import SACTFPolicy
 from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 
 # custom imports
-from algorithms.drq_agent.sac_policy import NoAugSACTorchPolicy, DrqSACTorchPolicy
+from algorithms.drq.sac.sac_policy import NoAugSACTorchPolicy, DrqSACTorchPolicy
 
 
 #######################################################################################################
