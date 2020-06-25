@@ -1,5 +1,6 @@
 import numpy as np
 
+from ray.rllib.utils.annotations import override
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.models import ModelCatalog
 from ray.rllib.utils import try_import_torch
@@ -330,13 +331,13 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
 
     def sample_noise(self):
         if not self.no_noise:
-        self.fc_actor.sample_noise()
-        self.fc_critic.sample_noise()
+            self.fc_actor.sample_noise()
+            self.fc_critic.sample_noise()
 
     def remove_noise(self):
         if not self.no_noise:
-        self.fc_actor.remove_noise()
-        self.fc_critic.remove_noise()
+            self.fc_actor.remove_noise()
+            self.fc_critic.remove_noise()
 
 
 #######################################################################################################

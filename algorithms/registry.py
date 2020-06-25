@@ -26,7 +26,7 @@ def _import_drq_ppo_agent():
     return DrqPPOTrainer
 
 def _import_drq_dqn_agent():
-    from .drq_agent.rainbow_trainer import DrqDQNTrainer
+    from .drq_agent.dqn_trainer import DrqDQNTrainer
     return DrqDQNTrainer
 
 def _import_drq_rainbow_agent():
