@@ -10,6 +10,10 @@ F = None
 if nn:
     F = nn.functional
 
+
+from models import make_encoder
+
+
 #######################################################################################################
 #####################################   Helper stuff   #####################################################
 #######################################################################################################
@@ -143,6 +147,7 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
             augmentation=False,
             aug_num=2,
             max_shift=4,
+            encoder_type="impala",
             **kwargs):
         """Initialize variables of this model.
         Extra model kwargs:
@@ -169,16 +174,8 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
         self.embed_dim = embed_dim
         h, w, c = obs_space.shape
         shape = (c, h, w)
-
         # obs embedding 
-        conv_seqs = []
-        for out_channels in [16, 32, 32]:
-            conv_seq = ConvSequence(shape, out_channels)
-            shape = conv_seq.get_output_shape()
-            conv_seqs.append(conv_seq)
-        self.conv_seqs = nn.ModuleList(conv_seqs)
-        self.hidden_fc = nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=embed_dim)
-
+        self.encoder = make_encoder(encoder_type, shape, out_features=embed_dim)
 
         # NOTE: value output branches
         self.dueling = dueling
@@ -318,15 +315,9 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
         """ encode observations 
         """
         x = input_dict["obs"].float()
-        x = x / 255.0  # scale to 0-1
         if permute:
             x = x.permute(0, 3, 1, 2)  # NHWC => NCHW
-        for conv_seq in self.conv_seqs:
-            x = conv_seq(x)
-        x = torch.flatten(x, start_dim=1)
-        x = nn.functional.relu(x)
-        x = self.hidden_fc(x)
-        x = nn.functional.relu(x)
+        x = self.encoder(x)
         return x, state
 
     def sample_noise(self):

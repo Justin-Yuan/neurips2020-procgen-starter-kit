@@ -6,6 +6,10 @@ from ray.rllib.utils import try_import_torch
 torch, nn = try_import_torch()
 
 
+#######################################################################################################
+#####################################   Misc   #####################################################
+#######################################################################################################
+
 class ResidualBlock(nn.Module):
     def __init__(self, channels):
         super().__init__()
@@ -42,6 +46,48 @@ class ConvSequence(nn.Module):
         _c, h, w = self._input_shape
         return (self._out_channels, (h + 1) // 2, (w + 1) // 2)
 
+
+#######################################################################################################
+#####################################   Encoder   #####################################################
+#######################################################################################################
+
+class ImpalaEncoder(nn.Module):
+    """ embed image inputs using Implala CNN 
+    """
+    def __init__(self, obs_shape, out_features=256):
+        super().__init__()
+
+        # h, w, c = obs_space.shape
+        # shape = (c, h, w)
+        assert len(obs_shape) == 3
+        shape = obs_shape
+
+        conv_seqs = []
+        for out_channels in [16, 32, 32]:
+            conv_seq = ConvSequence(shape, out_channels)
+            shape = conv_seq.get_output_shape()
+            conv_seqs.append(conv_seq)
+        self.conv_seqs = nn.ModuleList(conv_seqs)
+        self.hidden_fc = nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=256)
+
+    def forward(self, x):
+        """ assume input is FloatTensor (B,C,H,W) 
+        """
+        x = x / 255.0  # scale to 0-1
+        for conv_seq in self.conv_seqs:
+            x = conv_seq(x)
+        x = torch.flatten(x, start_dim=1)
+        x = nn.functional.relu(x)
+        x = self.hidden_fc(x)
+        x = nn.functional.relu(x)
+        return x 
+
+
+
+
+#######################################################################################################
+#####################################   Full agent model   #####################################################
+#######################################################################################################
 
 class ImpalaCNN(TorchModelV2, nn.Module):
     """
@@ -90,5 +136,6 @@ class ImpalaCNN(TorchModelV2, nn.Module):
     def value_function(self):
         assert self._value is not None, "must call forward() first"
         return self._value
+
 
 ModelCatalog.register_custom_model("impala_cnn_torch", ImpalaCNN)

@@ -10,6 +10,13 @@ from models.impala_cnn_torch import ResidualBlock, ConvSequence
 from ray.rllib.utils.annotations import override
 import kornia
 
+from models import make_encoder
+
+
+#######################################################################################################
+#####################################   Main models   #####################################################
+#######################################################################################################
+
 class DrqPPOTorchModel(TorchModelV2, nn.Module):
     def __init__(self,
                 obs_space,
@@ -21,6 +28,7 @@ class DrqPPOTorchModel(TorchModelV2, nn.Module):
                 augmentation=False,
                 aug_num=2,
                 max_shift=4,
+                encoder_type="impala",
                 **kwargs):
         TorchModelV2.__init__(self, obs_space, action_space,
                                             num_outputs, model_config, name)
@@ -34,14 +42,9 @@ class DrqPPOTorchModel(TorchModelV2, nn.Module):
 
         h, w, c = obs_space.shape
         shape = (c, h, w)
+        # obs embedding 
+        self.encoder = make_encoder(encoder_type, shape, out_features=embed_dim)
   
-        conv_seqs = []
-        for out_channels in [16, 32, 32]:
-            conv_seq = ConvSequence(shape, out_channels)
-            shape = conv_seq.get_output_shape()
-            conv_seqs.append(conv_seq)
-        self.conv_seqs = nn.ModuleList(conv_seqs)
-        self.hidden_fc = nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=embed_dim)
         self.logits_fc = nn.Linear(in_features=embed_dim, out_features=num_outputs)
         self.value_fc = nn.Linear(in_features=embed_dim, out_features=1)
 
@@ -58,14 +61,10 @@ class DrqPPOTorchModel(TorchModelV2, nn.Module):
     @override(TorchModelV2)
     def forward(self, input_dict, state, seq_lens):
         x = input_dict["obs"].float()
-        x = x / 255.0  # scale to 0-1
+        # x = x / 255.0  # scale to 0-1     # done in encoder already 
         x = x.permute(0, 3, 1, 2)  # NHWC => NCHW
-        for conv_seq in self.conv_seqs:
-            x = conv_seq(x)
-        x = torch.flatten(x, start_dim=1)
-        x = nn.functional.relu(x)
-        x = self.hidden_fc(x)
-        x = nn.functional.relu(x)
+        x = self.encoder(x)
+        # get output stuff 
         logits = self.logits_fc(x)
         value = self.value_fc(x)
         self._value = value.squeeze(1)

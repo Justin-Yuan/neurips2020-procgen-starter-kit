@@ -4,6 +4,10 @@ import torch.nn as nn
 from models.pixel_encoder import OUT_DIM
 
 
+#######################################################################################################
+#####################################   Decoders   #####################################################
+#######################################################################################################
+
 class PixelDecoder(nn.Module):
     def __init__(self, obs_shape, feature_dim, num_layers=2, num_filters=32):
         super().__init__()
@@ -62,13 +66,3 @@ class PixelDecoder(nn.Module):
         L.log_param('train_decoder/fc', self.fc, step)
 
 
-_AVAILABLE_DECODERS = {'pixel': PixelDecoder}
-
-
-def make_decoder(
-    decoder_type, obs_shape, feature_dim, num_layers, num_filters
-):
-    assert decoder_type in _AVAILABLE_DECODERS
-    return _AVAILABLE_DECODERS[decoder_type](
-        obs_shape, feature_dim, num_layers, num_filters
-    )

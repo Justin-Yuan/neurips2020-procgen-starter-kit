@@ -2,15 +2,25 @@ from ray.rllib.utils import try_import_torch
 
 torch, nn = try_import_torch()
 
-def tie_weights(src, trg):
-    assert type(src) == type(trg)
-    trg.weight = src.weight
-    trg.bias = src.bias
+
+#######################################################################################################
+#####################################   Helper funcs   #####################################################
+#######################################################################################################
 
 # for 84 x 84 inputs
 # # OUT_DIM = {2: 39, 4: 35, 6: 31}
 # for 64 x 64 inputs
 OUT_DIM = {2: 29, 4: 25, 6: 21}
+
+def tie_weights(src, trg):
+    assert type(src) == type(trg)
+    trg.weight = src.weight
+    trg.bias = src.bias
+
+
+#######################################################################################################
+#####################################   Encoders   #####################################################
+#######################################################################################################
 
 class PixelEncoder(nn.Module):
     """Convolutional encoder of pixels observations."""
