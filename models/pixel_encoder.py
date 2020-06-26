@@ -7,9 +7,16 @@ def tie_weights(src, trg):
     trg.weight = src.weight
     trg.bias = src.bias
 
+# for 84 x 84 inputs
+# # OUT_DIM = {2: 39, 4: 35, 6: 31}
+# for 64 x 64 inputs
+OUT_DIM = {2: 29, 4: 25, 6: 21}
 
+<<<<<<< HEAD
 # OUT_DIM = {2: 39, 4: 35, 6: 31}
 OUT_DIM = {2: 29, 4: 25, 6: 21}
+=======
+>>>>>>> 2b400c0a483e42cbddfa31e004ecadc2d8fc9293
 
 class PixelEncoder(nn.Module):
     """Convolutional encoder of pixels observations."""
@@ -117,14 +124,3 @@ class IdentityEncoder(nn.Module):
     def log(self, L, step, log_freq):
         pass
 
-
-_AVAILABLE_ENCODERS = {'pixel': PixelEncoder, 'identity': IdentityEncoder}
-
-
-def make_encoder(
-    encoder_type, obs_shape, feature_dim, num_layers, num_filters
-):
-    assert encoder_type in _AVAILABLE_ENCODERS
-    return _AVAILABLE_ENCODERS[encoder_type](
-        obs_shape, feature_dim, num_layers, num_filters
-    )
