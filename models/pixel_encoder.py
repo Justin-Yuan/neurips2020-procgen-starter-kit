@@ -12,12 +12,6 @@ def tie_weights(src, trg):
 # for 64 x 64 inputs
 OUT_DIM = {2: 29, 4: 25, 6: 21}
 
-<<<<<<< HEAD
-# OUT_DIM = {2: 39, 4: 35, 6: 31}
-OUT_DIM = {2: 29, 4: 25, 6: 21}
-=======
->>>>>>> 2b400c0a483e42cbddfa31e004ecadc2d8fc9293
-
 class PixelEncoder(nn.Module):
     """Convolutional encoder of pixels observations."""
     def __init__(self, obs_shape, feature_dim, num_layers=2, num_filters=32):

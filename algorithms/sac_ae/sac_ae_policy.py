@@ -13,6 +13,7 @@ from ray.rllib.policy.torch_policy_template import build_torch_policy
 from ray.rllib.models.torch.torch_action_dist import (
     TorchCategorical, TorchSquashedGaussian, TorchDiagGaussian, TorchBeta)
 from ray.rllib.utils import try_import_torch
+from ray.rllib.policy.rnn_sequencing import pad_batch_to_sequences_of_same_size
 
 # custom imports 
 from ray.rllib.models import ModelCatalog
@@ -21,6 +22,10 @@ from ray.rllib.utils.error import UnsupportedSpaceException
 # from ray.rllib.agents.sac.sac_torch_policy import actor_critic_loss
 from algorithms.sac_ae.sac_ae_model import SACAETorchModel
 
+from ray.rllib.utils.annotations import override
+from ray.rllib.policy.policy import Policy, LEARNER_STATS_KEY
+import time
+from ray.rllib.utils import force_list
 
 torch, nn = try_import_torch()
 F = nn.functional
@@ -663,6 +668,76 @@ class TargetNetworkMixin:
             }
         self.target_model.load_state_dict(model_state_dict)
 
+class SACAEMixin:
+    def __init__(self):
+        pass
+    
+    @override(Policy)
+    def learn_on_batch(self, postprocessed_batch):
+        # Get batch ready for RNNs, if applicable.
+        pad_batch_to_sequences_of_same_size(
+            postprocessed_batch,
+            max_seq_len=self.max_seq_len,
+            shuffle=False,
+            batch_divisibility_req=self.batch_divisibility_req)
+
+        train_batch = self._lazy_tensor_dict(postprocessed_batch)
+        loss_out = force_list(
+            self._loss(self, self.model, self.dist_class, train_batch))
+        assert len(loss_out) == len(self._optimizers)
+        # assert not any(torch.isnan(l) for l in loss_out)
+
+        # Loop through all optimizers.
+        grad_info = {"allreduce_latency": 0.0}
+        len_optim = len(self._optimizers)
+        for i, opt in enumerate(self._optimizers):
+            if i != len_optim-1 & i != len_optim - 2:
+                # Erase gradients in all vars of this optimizer.
+                opt.zero_grad()
+                # Recompute gradients of loss over all variables.
+                loss_out[i].backward(retain_graph=(i < len(self._optimizers) - 1))
+                grad_info.update(self.extra_grad_process(opt, loss_out[i]))
+
+                if self.distributed_world_size:
+                    grads = []
+                    for param_group in opt.param_groups:
+                        for p in param_group["params"]:
+                            if p.grad is not None:
+                                grads.append(p.grad)
+
+                    start = time.time()
+                    if torch.cuda.is_available():
+                        # Sadly, allreduce_coalesced does not work with CUDA yet.
+                        for g in grads:
+                            torch.distributed.all_reduce(
+                                g, op=torch.distributed.ReduceOp.SUM)
+                    else:
+                        torch.distributed.all_reduce_coalesced(
+                            grads, op=torch.distributed.ReduceOp.SUM)
+
+                    for param_group in opt.param_groups:
+                        for p in param_group["params"]:
+                            if p.grad is not None:
+                                p.grad /= self.distributed_world_size
+
+                    grad_info["allreduce_latency"] += time.time() - start
+
+                # Step the optimizer.
+                opt.step()
+        # handle ae_loss and encoder/decoder optims
+        decoder_optimizer = self.optimizers[-1]
+        encoder_optimizer = self.optimizers[-2]
+        loss = loss_out[-1]
+        encoder_optimizer.zero_grad()
+        decoder_optimizer.zero_grad()
+        loss.backward()
+
+        self.encoder_optimizer.step()
+        self.decoder_optimizer.step()
+
+        grad_info["allreduce_latency"] /= len(self._optimizers)
+        grad_info.update(self.extra_grad_info(train_batch))
+        return {LEARNER_STATS_KEY: grad_info}
 
 def setup_late_mixins(policy, obs_space, action_space, config):
     policy.target_model = policy.target_model.to(policy.device)
@@ -670,7 +745,7 @@ def setup_late_mixins(policy, obs_space, action_space, config):
     policy.model.target_entropy = policy.model.target_entropy.to(policy.device)
     ComputeTDErrorMixin.__init__(policy)
     TargetNetworkMixin.__init__(policy)
-
+    SACAEMixin.__init__(policy)
 
 #######################################################################################################
 #####################################   Policy   #####################################################
@@ -688,7 +763,7 @@ SACAETorchPolicy = build_torch_policy(
     extra_grad_process_fn=apply_grad_clipping,
     optimizer_fn=optimizer_fn,
     after_init=setup_late_mixins,
-    mixins=[TargetNetworkMixin, ComputeTDErrorMixin]
+    mixins=[TargetNetworkMixin, ComputeTDErrorMixin, SACAEMixin]
 )
 
 DrqSACAETorchPolicy = None
