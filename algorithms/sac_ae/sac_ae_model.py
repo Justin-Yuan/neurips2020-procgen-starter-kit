@@ -13,8 +13,7 @@ from ray.rllib.utils.annotations import override
 # aug
 import kornia
 # ae
-from models.pixel_encoder import make_encoder
-from models.pixel_decoder import make_decoder
+from models import make_encoder, make_decoder
 
 
 def weight_init(m):
