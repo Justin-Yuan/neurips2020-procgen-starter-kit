@@ -4,7 +4,7 @@ from ray.rllib.agents.sac.sac_torch_policy import SACTorchPolicy
 from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 from ray.rllib.agents.trainer_template import build_trainer
 # custom imports
-from algorithms.sac_ae_agent.sac_ae_policy import SACAETorchPolicy, DrqSACAETorchPolicy
+from algorithms.sac_ae.sac_ae_policy import SACAETorchPolicy, DrqSACAETorchPolicy
 
 
 #######################################################################################################

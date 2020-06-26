@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from models.sac_ae_encoder import OUT_DIM
+from models.pixel_encoder import OUT_DIM
 
 
 class PixelDecoder(nn.Module):

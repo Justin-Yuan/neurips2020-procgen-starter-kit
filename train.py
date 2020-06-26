@@ -220,6 +220,7 @@ def run(args, parser):
             redis_max_memory=args.ray_redis_max_memory,
             num_cpus=args.ray_num_cpus,
             num_gpus=args.ray_num_gpus)
+   
     run_experiments(
         experiments,
         scheduler=_make_scheduler(args),

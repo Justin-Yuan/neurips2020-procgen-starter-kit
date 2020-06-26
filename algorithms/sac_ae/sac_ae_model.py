@@ -63,7 +63,7 @@ class SACAETorchModel(TorchModelV2, nn.Module):
                  aug_num=2,
                  max_shift=4,
                  encoder_feature_dim=50,
-                 num_layers=4,
+                 num_layers=2,
                  num_filters=32,
                  decoder_type='pixel',
                  encoder_type='pixel',
@@ -112,9 +112,16 @@ class SACAETorchModel(TorchModelV2, nn.Module):
 
         # Build the policy network
         # TODO: fix func input
-        self.actor_encoder = make_encoder(encoder_type, obs_shape, encoder_feature_dim, num_layers,
-            num_filters
+        self.actor_encoder = make_encoder(
+            encoder_type, obs_shape, encoder_feature_dim, num_layers, num_filters
         )
+
+        self.critic_encoder = make_encoder(
+            encoder_type, obs_shape, encoder_feature_dim, num_layers, num_filters
+        )
+
+        # tie encoders between actor and critic
+        self.actor_encoder.copy_conv_weights_from(self.critic_encoder)
 
         self.action_model = nn.Sequential()
         # img -> embedding
@@ -143,10 +150,7 @@ class SACAETorchModel(TorchModelV2, nn.Module):
 
         # Build the Q-net(s), including target Q-net(s).
         def build_q_net(name_):
-            self.critic_encoder = make_encoder(
-                encoder_type, obs_shape, encoder_feature_dim, num_layers,
-                num_filters
-            )
+            
 
             act = get_activation_fn(
                 critic_hidden_activation, framework="torch")
@@ -223,7 +227,7 @@ class SACAETorchModel(TorchModelV2, nn.Module):
     def forward(self, input_dict, state, seq_lens):
         """ return embedding value
         """
-        detach_encoder = True
+        detach_encoder = False
         # x = self.get_embeddings(input_dict, state, seq_lens)
         x = self.actor_encoder(input_dict["obs"].permute(0,3,1,2), detach=detach_encoder)
         logits = self.get_policy_output(x)

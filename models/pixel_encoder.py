@@ -1,6 +1,6 @@
-import torch
-import torch.nn as nn
+from ray.rllib.utils import try_import_torch
 
+torch, nn = try_import_torch()
 
 def tie_weights(src, trg):
     assert type(src) == type(trg)
@@ -9,7 +9,7 @@ def tie_weights(src, trg):
 
 
 # OUT_DIM = {2: 39, 4: 35, 6: 31}
-OUT_DIM = {2: 39, 4: 25, 6: 31}
+OUT_DIM = {2: 29, 4: 25, 6: 21}
 
 class PixelEncoder(nn.Module):
     """Convolutional encoder of pixels observations."""
@@ -24,12 +24,16 @@ class PixelEncoder(nn.Module):
         self.convs = nn.ModuleList(
             [nn.Conv2d(obs_shape[0], num_filters, 3, stride=2)]
         )
-        for i in range(num_layers - 1):
+        for _ in range(num_layers - 1):
             self.convs.append(nn.Conv2d(num_filters, num_filters, 3, stride=1))
 
         out_dim = OUT_DIM[num_layers]
-        self.fc = nn.Linear(num_filters * out_dim * out_dim, self.feature_dim)
-        self.ln = nn.LayerNorm(self.feature_dim)
+        # self.fc = nn.Linear(num_filters * out_dim * out_dim, self.feature_dim)
+        self.fc = lambda x: torch.matmul(
+            x, torch.ones(num_filters * out_dim * out_dim, self.feature_dim)
+        )
+        # self.ln = nn.LayerNorm(self.feature_dim)
+        self.ln = lambda x: x
 
         self.outputs = dict()
 
@@ -39,33 +43,40 @@ class PixelEncoder(nn.Module):
         return mu + eps * std
 
     def forward_conv(self, obs):
+
         obs = obs / 255.
-        self.outputs['obs'] = obs
+        # self.outputs['obs'] = obs
 
         conv = torch.relu(self.convs[0](obs))
-        self.outputs['conv1'] = conv
+        # self.outputs['conv1'] = conv
 
-        for i in range(1, self.num_layers):
-            conv = torch.relu(self.convs[i](conv))
-            self.outputs['conv%s' % (i + 1)] = conv
+        # for i in range(1, self.num_layers):
+        #     conv = self.convs[i](conv)
+        #     conv = torch.relu(conv)
+            # self.outputs['conv%s' % (i + 1)] = conv
 
-        h = conv.view(conv.size(0), -1)
+        conv2 = torch.relu(self.convs[1](conv))
+
+        h = conv2.view(conv2.size(0), -1)
         return h
 
     def forward(self, obs, detach=False):
-        h = self.forward_conv(obs)
+        hid = self.forward_conv(obs)
 
         if detach:
-            h = h.detach()
+            hid = hid.detach()
             
-        h_fc = self.fc(h)
-        self.outputs['fc'] = h_fc
+        try:
+            h_fc = self.fc(hid)
+        except:
+            import ipdb; ipdb.set_trace()
+        # self.outputs['fc'] = h_fc
 
         h_norm = self.ln(h_fc)
-        self.outputs['ln'] = h_norm
+        # self.outputs['ln'] = h_norm
 
         out = torch.tanh(h_norm)
-        self.outputs['tanh'] = out
+        # self.outputs['tanh'] = out
 
         return out
 
