@@ -16,7 +16,7 @@ drq_ppo:
     # === Stop Conditions ===
     ################################################
     stop:
-        timesteps_total: 8000000  # 100
+        timesteps_total: 8000  # 100
 
     ################################################
     # === Settings for Checkpoints ===

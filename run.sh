@@ -11,22 +11,22 @@ export EXPERIMENT_DEFAULT="experiments/drq_ppo.yaml"
 export EXPERIMENT=${EXPERIMENT:-$EXPERIMENT_DEFAULT}
 
 if [[ -z $AICROWD_IS_GRADING ]]; then
-  ##########################################################################
-  # This section contains commands you would like to run, when running     #
-  # the codebase on your machines. During evaluation AICROWD_IS_GRADING    #
-  # variable is set, due to which this block will be skipped.              #
-  ##########################################################################
+    ##########################################################################
+    # This section contains commands you would like to run, when running     #
+    # the codebase on your machines. During evaluation AICROWD_IS_GRADING    #
+    # variable is set, due to which this block will be skipped.              #
+    ##########################################################################
 
-  export OUTPUTS_DIR=./outputs
-  # export RAY_MEMORY_LIMIT=100000000
-  export RAY_MEMORY_LIMIT=400000000
-  export RAY_CPUS=2
-  # export RAY_STORE_MEMORY=1000000000
-  export RAY_STORE_MEMORY=4000000000
+    export OUTPUTS_DIR=./outputs
+    # export RAY_MEMORY_LIMIT=100000000
+    export RAY_MEMORY_LIMIT=400000000
+    export RAY_CPUS=2
+    # export RAY_STORE_MEMORY=1000000000
+    export RAY_STORE_MEMORY=4000000000
 
-  # Cleaning output directory between multiple runs
-  rm -rf ${OUTPUTS_DIR}
-  mkdir ${OUTPUTS_DIR}
+    # Cleaning output directory between multiple runs
+    rm -rf ${OUTPUTS_DIR}
+    mkdir ${OUTPUTS_DIR}
 fi
 
 
@@ -58,41 +58,41 @@ USAGE
 }
 
 detect_latest_checkpoint() {
-  export DIRECTORY="$HOME/ray_results"
-  export EXPERIMENT_NAME=$(cat $EXPERIMENT | grep -Ev '^ |^#' | head -n1 | awk -F':' '{print $1}')
-  export LATEST_EXECUTION_DIRECTORY=$(ls -trd $DIRECTORY/$EXPERIMENT_NAME/*/ | tail -n 1)
-  if [ -z $LATEST_EXECUTION_DIRECTORY ]; then
-    echo "Cannot find checkpoint in ~/ray_results, have you run training phase yet?"
-    exit;
-  fi
-  export LATEST_CHECKPOINT_DIRECTORY=$(ls -trd ${LATEST_EXECUTION_DIRECTORY%/}/*/ | tail -n 1)
-  export CHECKPOINT=$(find ${LATEST_CHECKPOINT_DIRECTORY%/} | grep "tune_metadata" | head -n1 | awk -F'\.tune_metadata' '{print $1}')
+    export DIRECTORY="$HOME/ray_results"
+    export EXPERIMENT_NAME=$(cat $EXPERIMENT | grep -Ev '^ |^#' | head -n1 | awk -F':' '{print $1}')
+    export LATEST_EXECUTION_DIRECTORY=$(ls -trd $DIRECTORY/$EXPERIMENT_NAME/*/ | tail -n 1)
+    if [ -z $LATEST_EXECUTION_DIRECTORY ]; then
+        echo "Cannot find checkpoint in ~/ray_results, have you run training phase yet?"
+        exit;
+    fi
+    export LATEST_CHECKPOINT_DIRECTORY=$(ls -trd ${LATEST_EXECUTION_DIRECTORY%/}/*/ | tail -n 1)
+    export CHECKPOINT=$(find ${LATEST_CHECKPOINT_DIRECTORY%/} | grep "tune_metadata" | head -n1 | awk -F'\.tune_metadata' '{print $1}')
 }
 
 print_banner
 
 if [[ " $@ " =~ " --train " ]]; then
-  export VALID_RUN=true
-  # echo "Executing: python train.py -f ${EXPERIMENT} --ray-memory ${RAY_MEMORY_LIMIT:-1500000000} --ray-num-cpus ${RAY_CPUS:-2} --ray-object-store-memory ${RAY_STORE_MEMORY:-1000000000}"
-  # python train.py -f ${EXPERIMENT} --ray-memory ${RAY_MEMORY_LIMIT:-1500000000} --ray-num-cpus ${RAY_CPUS:-2} --ray-object-store-memory ${RAY_STORE_MEMORY:-1000000000}
-  echo "Executing: python train.py -f ${EXPERIMENT} --ray-memory ${RAY_MEMORY_LIMIT:-4000000000} --ray-num-cpus ${RAY_CPUS:-2} --ray-object-store-memory ${RAY_STORE_MEMORY:-1000000000}"
-  python train.py -f ${EXPERIMENT} --ray-memory ${RAY_MEMORY_LIMIT:-4000000000} --ray-num-cpus ${RAY_CPUS:-2} --ray-object-store-memory ${RAY_STORE_MEMORY:-4000000000}
-  STATUS_CODE=$?
+    export VALID_RUN=true
+    # echo "Executing: python train.py -f ${EXPERIMENT} --ray-memory ${RAY_MEMORY_LIMIT:-1500000000} --ray-num-cpus ${RAY_CPUS:-2} --ray-object-store-memory ${RAY_STORE_MEMORY:-1000000000}"
+    # python train.py -f ${EXPERIMENT} --ray-memory ${RAY_MEMORY_LIMIT:-1500000000} --ray-num-cpus ${RAY_CPUS:-2} --ray-object-store-memory ${RAY_STORE_MEMORY:-1000000000}
+    echo "Executing: python train.py -f ${EXPERIMENT} --ray-memory ${RAY_MEMORY_LIMIT:-4000000000} --ray-num-cpus ${RAY_CPUS:-2} --ray-object-store-memory ${RAY_STORE_MEMORY:-1000000000}"
+    python train.py -f ${EXPERIMENT} --ray-memory ${RAY_MEMORY_LIMIT:-4000000000} --ray-num-cpus ${RAY_CPUS:-2} --ray-object-store-memory ${RAY_STORE_MEMORY:-4000000000}
+    STATUS_CODE=$?
 fi
 
 
 if [[ " $@ " =~ " --rollout " ]]; then
-  export VALID_RUN=true
-  export ROLLOUT_RUN=$(cat $EXPERIMENT | grep '  run:' | awk '{print $2}')
-  export ROLLOUT_ENV=$(cat $EXPERIMENT | grep '  env:' | awk '{print $2}')
+    export VALID_RUN=true
+    export ROLLOUT_RUN=$(cat $EXPERIMENT | grep '  run:' | awk '{print $2}')
+    export ROLLOUT_ENV=$(cat $EXPERIMENT | grep '  env:' | awk '{print $2}')
 
-  if [ -z $CHECKPOINT ]; then
-    detect_latest_checkpoint
-  fi
-  echo "Rollout with checkpoint: $CHECKPOINT"
-  echo "Executing: python ./rollout.py $CHECKPOINT --episodes ${EPISODES:-5} --run $ROLLOUT_RUN --env $ROLLOUT_ENV"
-  python ./rollout.py $CHECKPOINT --episodes ${EPISODES:-20} --run $ROLLOUT_RUN --env $ROLLOUT_ENV --video-dir videos
-  STATUS_CODE=$?
+    if [ -z $CHECKPOINT ]; then
+        detect_latest_checkpoint
+    fi
+    echo "Rollout with checkpoint: $CHECKPOINT"
+    echo "Executing: python ./rollout.py $CHECKPOINT --episodes ${EPISODES:-5} --run $ROLLOUT_RUN --env $ROLLOUT_ENV"
+    python ./rollout.py $CHECKPOINT --episodes ${EPISODES:-20} --run $ROLLOUT_RUN --env $ROLLOUT_ENV --video-dir videos
+    STATUS_CODE=$?
 fi
 
 
