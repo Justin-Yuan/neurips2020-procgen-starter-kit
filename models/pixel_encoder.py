@@ -7,10 +7,16 @@ torch, nn = try_import_torch()
 #####################################   Helper funcs   #####################################################
 #######################################################################################################
 
-# for 84 x 84 inputs
-# # OUT_DIM = {2: 39, 4: 35, 6: 31}
-# for 64 x 64 inputs
+# # for 84 x 84 inputs
+# OUT_DIM = {2: 39, 4: 35, 6: 31}
+# # for 64 x 64 inputs
 OUT_DIM = {2: 29, 4: 25, 6: 21}
+# OUT_DIM = {
+#     84: {2: 39, 4: 35, 6: 31},
+#     64: {2: 29, 4: 25, 6: 21},
+#     54: {2: 29, 4: 25, 6: 21},
+# }
+
 
 def tie_weights(src, trg):
     assert type(src) == type(trg)
@@ -24,7 +30,7 @@ def tie_weights(src, trg):
 
 class PixelEncoder(nn.Module):
     """Convolutional encoder of pixels observations."""
-    def __init__(self, obs_shape, feature_dim, num_layers=2, num_filters=32):
+    def __init__(self, obs_shape, feature_dim, num_layers=4, num_filters=32):
         super().__init__()
 
         assert len(obs_shape) == 3
@@ -39,12 +45,8 @@ class PixelEncoder(nn.Module):
             self.convs.append(nn.Conv2d(num_filters, num_filters, 3, stride=1))
 
         out_dim = OUT_DIM[num_layers]
-        # self.fc = nn.Linear(num_filters * out_dim * out_dim, self.feature_dim)
-        self.fc = lambda x: torch.matmul(
-            x, torch.ones(num_filters * out_dim * out_dim, self.feature_dim)
-        )
-        # self.ln = nn.LayerNorm(self.feature_dim)
-        self.ln = lambda x: x
+        self.fc = nn.Linear(num_filters * out_dim * out_dim, self.feature_dim)
+        self.ln = nn.LayerNorm(self.feature_dim)
 
         self.outputs = dict()
 
@@ -56,19 +58,16 @@ class PixelEncoder(nn.Module):
     def forward_conv(self, obs):
 
         obs = obs / 255.
-        # self.outputs['obs'] = obs
+        self.outputs['obs'] = obs
 
         conv = torch.relu(self.convs[0](obs))
-        # self.outputs['conv1'] = conv
+        self.outputs['conv1'] = conv
 
-        # for i in range(1, self.num_layers):
-        #     conv = self.convs[i](conv)
-        #     conv = torch.relu(conv)
-            # self.outputs['conv%s' % (i + 1)] = conv
+        for i in range(1, self.num_layers):
+            conv = torch.relu(self.convs[i](conv))
+            self.outputs['conv%s' % (i + 1)] = conv
 
-        conv2 = torch.relu(self.convs[1](conv))
-
-        h = conv2.view(conv2.size(0), -1)
+        h = conv.view(conv.size(0), -1)
         return h
 
     def forward(self, obs, detach=False):
@@ -81,13 +80,13 @@ class PixelEncoder(nn.Module):
             h_fc = self.fc(hid)
         except:
             import ipdb; ipdb.set_trace()
-        # self.outputs['fc'] = h_fc
+        self.outputs['fc'] = h_fc
 
         h_norm = self.ln(h_fc)
-        # self.outputs['ln'] = h_norm
+        self.outputs['ln'] = h_norm
 
         out = torch.tanh(h_norm)
-        # self.outputs['tanh'] = out
+        self.outputs['tanh'] = out
 
         return out
 
@@ -128,3 +127,20 @@ class IdentityEncoder(nn.Module):
     def log(self, L, step, log_freq):
         pass
 
+
+
+
+
+#######################################################################################################
+#####################################   Misc   #####################################################
+#######################################################################################################
+# to infer OUT_DIM sizes 
+
+if __name__ == "__main__":
+    obs_shape = ()
+    feature_dim = 128
+    net = PixelEncoder(obs_shape, feature_dim, num_layers=4)
+    x = torch.ones(2, *obs_shape)
+    
+    import ipdb; ipdb.set_trace()
+    print("test done ...")

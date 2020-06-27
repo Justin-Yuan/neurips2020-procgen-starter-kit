@@ -5,6 +5,9 @@ from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 # from ray.rllib.agents.sac.sac_torch_policy import SACTorchPolicy
 from algorithms.curl.sac.sac_policy import CurlSACTorchPolicy
 
+#######################################################################################################
+#####################################   Config Template   #####################################################
+#######################################################################################################
 
 OPTIMIZER_SHARED_CONFIGS = [
     "buffer_size", "prioritized_replay", "prioritized_replay_alpha",
@@ -37,9 +40,7 @@ DEFAULT_CONFIG = with_common_config({
     "normalize_actions": True,
 
     # === Customs ===
-    "augmentation": True,
-    "aug_num": 2,
-    "max_shift": 4,  
+
 
     # === Learning ===
     # Disable setting done=True at end of episode. This should be set to True
@@ -130,6 +131,9 @@ DEFAULT_CONFIG = with_common_config({
 # yapf: enable
 
 
+#######################################################################################################
+#####################################   Helper funcs   #####################################################
+#######################################################################################################
 
 def validate_config(config):
     if config.get("grad_norm_clipping", DEPRECATED_VALUE) != DEPRECATED_VALUE:
@@ -151,11 +155,75 @@ def validate_config(config):
                 "{}.fcnet_hiddens".format(model),
                 error=True)
 
+#######################################################################################################
+#####################################   Trainer   #####################################################
+#######################################################################################################
+
+
+# curl_config = DEFAULT_CONFIG.copy()
+# # optimizer params 
+# curl_config["optimization"] = {
+#     "actor_learning_rate": 1e-3,
+#     "critic_learning_rate": 1e-3,
+#     "entropy_learning_rate": 1e-3,
+#     "actor_beta": 0.9,
+#     "critic_beta": 0.9,
+#     "alpha_beta": 0.9,
+#     "encoder_learning_rate": 1e-3, 
+# }
+# # training uopdate freq 
+# curl_config["actor_update_freq"] = 2
+# curl_config["cpc_update_freq"] = 1
+# curl_config["target_network_update_freq"] = 2
+# # target update params 
+# curl_config["critic_tau"] = 0.01    # try 0.05 or 0.1
+# curl_config["encoder_tau"] = 0.05
+# # customs 
+# curl_config["cropped_image_size"] = 54
+# curl_config["embed_dim"] = 50
+
+
+# reference: https://github.com/MishaLaskin/curl/blob/537ac39314f4d88ee0b7f19a54564bb98c7bfb72/train.py
+new_config = {
+
+    "optimization": {
+        "actor_learning_rate": 1e-3,
+        "critic_learning_rate": 1e-3,
+        "entropy_learning_rate": 1e-4,
+        "actor_beta": 0.9,
+        "critic_beta": 0.9,
+        "alpha_beta": 0.5,
+        "encoder_learning_rate": 1e-3, 
+    },
+
+    "actor_update_freq": 2,
+    "cpc_update_freq": 1,
+    "target_network_update_freq": 2,
+
+    "critic_tau": 0.01,
+    "encoder_tau": 0.05,
+
+    "learning_starts": 1000,
+    "train_batch_size": 32,
+    "gamma": 0.99,
+
+    "initial_alpha": 0.1,
+
+    # customs 
+    "embed_dim": 128,
+    "cropped_image_size": 54,
+}
+curl_config = DEFAULT_CONFIG.copy()
+curl_config.update(new_config)
+
+
 
 CurlSACTrainer = GenericOffPolicyTrainer.with_updates(
     name="CurlSAC",
-    default_config=DEFAULT_CONFIG,
+    default_config=curl_config,
     validate_config=validate_config,
     default_policy=CurlSACTorchPolicy,
     get_policy_class=lambda x: DrqSACTorchPolicy,
 )
+
+

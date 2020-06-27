@@ -62,7 +62,7 @@ class SACAETorchModel(TorchModelV2, nn.Module):
                  aug_num=2,
                  max_shift=4,
                  encoder_feature_dim=50,
-                 num_layers=2,
+                 num_layers=4,
                  num_filters=32,
                  decoder_type='pixel',
                  encoder_type='pixel',

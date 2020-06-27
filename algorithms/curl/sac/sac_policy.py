@@ -4,8 +4,7 @@ import logging
 import ray
 import ray.experimental.tf_utils
 from ray.rllib.agents.a3c.a3c_torch_policy import apply_grad_clipping
-from ray.rllib.agents.sac.sac_tf_policy import build_sac_model, \
-    postprocess_trajectory
+from ray.rllib.agents.sac.sac_tf_policy import build_sac_model, postprocess_trajectory
 from ray.rllib.agents.dqn.dqn_tf_policy import PRIO_WEIGHTS
 from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.policy.torch_policy_template import build_torch_policy
@@ -19,8 +18,8 @@ from ray.rllib.utils.error import UnsupportedSpaceException
 from ray.rllib.utils.annotations import override
 from ray.rllib.policy.policy import Policy, LEARNER_STATS_KEY
 from ray.rllib.policy.torch_policy import TorchPolicy
-from algorithms.curl.sac.sac_model import CurlSACTorchModel
-
+from algorithms.curl.sac.sac_model import CurlSACTorchModel, CURL
+import kornia 
 
 torch, nn = try_import_torch()
 F = nn.functional
@@ -49,9 +48,10 @@ def build_curl_sac_model(policy, obs_space, action_space, config):
             "Consider reshaping this into a single dimension, "
             "using a Tuple action space, or the multi-agent API.")
 
-    # infer num_outpus as action space dim (not embedding size!!)
-    _, num_outputs = ModelCatalog.get_action_dist(
-        action_space, config["model"], framework="torch")
+    # # infer num_outpus as action space dim (not embedding size!!)
+    # _, num_outputs = ModelCatalog.get_action_dist(
+    #     action_space, config["model"], framework="torch")
+    num_outputs = action_space.n
 
     # Force-ignore any additionally provided hidden layer sizes.
     # Everything should be configured using SAC's "Q_model" and "policy_model"
@@ -69,11 +69,13 @@ def build_curl_sac_model(policy, obs_space, action_space, config):
         twin_q=config["twin_q"],
         initial_alpha=config["initial_alpha"],
         target_entropy=config["target_entropy"],
-        augmentation=config["augmentation"],
-        aug_num=config["aug_num"],
-        max_shift=config["max_shift"]) 
+        embed_dim=config["embed_dim"],
+        encoder_type="pixel",
+        num_layers=4,
+        num_filters=32,
+        cropped_image_size=config["cropped_image_size"]) 
 
-
+    # target 
     policy.target_model = CurlSACTorchModel(
         obs_space=obs_space,
         action_space=action_space,
@@ -87,22 +89,40 @@ def build_curl_sac_model(policy, obs_space, action_space, config):
         twin_q=config["twin_q"],
         initial_alpha=config["initial_alpha"],
         target_entropy=config["target_entropy"],
-        augmentation=config["augmentation"],
-        aug_num=config["aug_num"],
-        max_shift=config["max_shift"])
+        embed_dim=config["embed_dim"],
+        encoder_type="pixel",
+        num_layers=4,
+        num_filters=32,
+        cropped_image_size=config["cropped_image_size"]) 
+
+    # NOTE: customs 
+    policy.curl = CURL(
+        policy.model.embed_dim,
+        policy.model.encoder,
+        policy.target_model.encoder 
+    )
 
     return policy.model
 
 
 def build_curl_sac_model_and_action_dist(policy, obs_space, action_space, config):
-    model = build_drq_sac_model(policy, obs_space, action_space, config)
+    model = build_curl_sac_model(policy, obs_space, action_space, config)
     action_dist_class = get_dist_class(config, action_space)
     return model, action_dist_class
 
 
+def get_dist_class(config, action_space):
+    if isinstance(action_space, Discrete):
+        return TorchCategorical
+    else:
+        if config["normalize_actions"]:
+            return TorchSquashedGaussian if \
+                not config["_use_beta_distribution"] else TorchBeta
+        else:
+            return TorchDiagGaussian
 
 
-def action_distribution_fn(policy,
+def curl_action_distribution_fn(policy,
                            model,
                            obs_batch,
                            *,
@@ -113,181 +133,24 @@ def action_distribution_fn(policy,
                            explore=None,
                            timestep=None,
                            is_training=None):
-    model_out, _ = model({
+    # crop input 
+    cropped_obs_batch = model.center_crop(
+        obs_batch.permute(0,3,1,2).float()
+    )
+    # get action distrib
+    model_out, _ = model.get_embeddings({
         "obs": obs_batch,
         "is_training": is_training,
-    }, [], None)
+    }, [], None, permute=False)
     distribution_inputs = model.get_policy_output(model_out)
     action_dist_class = get_dist_class(policy.config, policy.action_space)
+
     return distribution_inputs, action_dist_class, []
 
 
 #######################################################################################################
 #####################################   Loss   #####################################################
 #######################################################################################################
-
-def actor_critic_loss(policy, model, _, train_batch):
-    # Should be True only for debugging purposes (e.g. test cases)!
-    deterministic = policy.config["_deterministic_loss"]
-
-    model_out_t, _ = model({
-        "obs": train_batch[SampleBatch.CUR_OBS],
-        "is_training": True,
-    }, [], None)
-
-    model_out_tp1, _ = model({
-        "obs": train_batch[SampleBatch.NEXT_OBS],
-        "is_training": True,
-    }, [], None)
-
-    target_model_out_tp1, _ = policy.target_model({
-        "obs": train_batch[SampleBatch.NEXT_OBS],
-        "is_training": True,
-    }, [], None)
-
-    alpha = torch.exp(model.log_alpha)
-
-    # Discrete case.
-    if model.discrete:
-        # Get all action probs directly from pi and form their logp.
-        log_pis_t = F.log_softmax(model.get_policy_output(model_out_t), dim=-1)
-        policy_t = torch.exp(log_pis_t)
-        log_pis_tp1 = F.log_softmax(model.get_policy_output(model_out_tp1), -1)
-        policy_tp1 = torch.exp(log_pis_tp1)
-        # Q-values.
-        q_t = model.get_q_values(model_out_t)
-        # Target Q-values.
-        q_tp1 = policy.target_model.get_q_values(target_model_out_tp1)
-        if policy.config["twin_q"]:
-            twin_q_t = model.get_twin_q_values(model_out_t)
-            twin_q_tp1 = policy.target_model.get_twin_q_values(
-                target_model_out_tp1)
-            q_tp1 = torch.min(q_tp1, twin_q_tp1)
-        q_tp1 -= alpha * log_pis_tp1
-
-        # Actually selected Q-values (from the actions batch).
-        one_hot = F.one_hot(
-            train_batch[SampleBatch.ACTIONS], num_classes=q_t.size()[-1])
-        q_t_selected = torch.sum(q_t * one_hot, dim=-1)
-        if policy.config["twin_q"]:
-            twin_q_t_selected = torch.sum(twin_q_t * one_hot, dim=-1)
-        # Discrete case: "Best" means weighted by the policy (prob) outputs.
-        q_tp1_best = torch.sum(torch.mul(policy_tp1, q_tp1), dim=-1)
-        q_tp1_best_masked = \
-            (1.0 - train_batch[SampleBatch.DONES].float()) * \
-            q_tp1_best
-    # Continuous actions case.
-    else:
-        # Sample single actions from distribution.
-        action_dist_class = get_dist_class(policy.config, policy.action_space)
-        action_dist_t = action_dist_class(
-            model.get_policy_output(model_out_t), policy.model)
-        policy_t = action_dist_t.sample() if not deterministic else \
-            action_dist_t.deterministic_sample()
-        log_pis_t = torch.unsqueeze(action_dist_t.logp(policy_t), -1)
-        action_dist_tp1 = action_dist_class(
-            model.get_policy_output(model_out_tp1), policy.model)
-        policy_tp1 = action_dist_tp1.sample() if not deterministic else \
-            action_dist_tp1.deterministic_sample()
-        log_pis_tp1 = torch.unsqueeze(action_dist_tp1.logp(policy_tp1), -1)
-
-        # Q-values for the actually selected actions.
-        q_t = model.get_q_values(model_out_t, train_batch[SampleBatch.ACTIONS])
-        if policy.config["twin_q"]:
-            twin_q_t = model.get_twin_q_values(
-                model_out_t, train_batch[SampleBatch.ACTIONS])
-
-        # Q-values for current policy in given current state.
-        q_t_det_policy = model.get_q_values(model_out_t, policy_t)
-        if policy.config["twin_q"]:
-            twin_q_t_det_policy = model.get_twin_q_values(
-                model_out_t, policy_t)
-            q_t_det_policy = torch.min(q_t_det_policy, twin_q_t_det_policy)
-
-        # Target q network evaluation.
-        q_tp1 = policy.target_model.get_q_values(target_model_out_tp1,
-                                                 policy_tp1)
-        if policy.config["twin_q"]:
-            twin_q_tp1 = policy.target_model.get_twin_q_values(
-                target_model_out_tp1, policy_tp1)
-            # Take min over both twin-NNs.
-            q_tp1 = torch.min(q_tp1, twin_q_tp1)
-
-        q_t_selected = torch.squeeze(q_t, dim=-1)
-        if policy.config["twin_q"]:
-            twin_q_t_selected = torch.squeeze(twin_q_t, dim=-1)
-        q_tp1 -= alpha * log_pis_tp1
-
-        q_tp1_best = torch.squeeze(input=q_tp1, dim=-1)
-        q_tp1_best_masked = (1.0 - train_batch[SampleBatch.DONES].float()) * \
-            q_tp1_best
-
-    assert policy.config["n_step"] == 1, "TODO(hartikainen) n_step > 1"
-
-    # compute RHS of bellman equation
-    q_t_selected_target = (
-        train_batch[SampleBatch.REWARDS] +
-        (policy.config["gamma"]**policy.config["n_step"]) * q_tp1_best_masked
-    ).detach()
-
-    # Compute the TD-error (potentially clipped).
-    base_td_error = torch.abs(q_t_selected - q_t_selected_target)
-    if policy.config["twin_q"]:
-        twin_td_error = torch.abs(twin_q_t_selected - q_t_selected_target)
-        td_error = 0.5 * (base_td_error + twin_td_error)
-    else:
-        td_error = base_td_error
-
-    critic_loss = [
-        0.5 * torch.mean(torch.pow(q_t_selected_target - q_t_selected, 2.0))
-    ]
-    if policy.config["twin_q"]:
-        critic_loss.append(0.5 * torch.mean(
-            torch.pow(q_t_selected_target - twin_q_t_selected, 2.0)))
-
-    # Alpha- and actor losses.
-    # Note: In the papers, alpha is used directly, here we take the log.
-    # Discrete case: Multiply the action probs as weights with the original
-    # loss terms (no expectations needed).
-    if model.discrete:
-        weighted_log_alpha_loss = policy_t.detach() * (
-            -model.log_alpha * (log_pis_t + model.target_entropy).detach())
-        # Sum up weighted terms and mean over all batch items.
-        alpha_loss = torch.mean(torch.sum(weighted_log_alpha_loss, dim=-1))
-        # Actor loss.
-        actor_loss = torch.mean(
-            torch.sum(
-                torch.mul(
-                    # NOTE: No stop_grad around policy output here
-                    # (compare with q_t_det_policy for continuous case).
-                    policy_t,
-                    alpha.detach() * log_pis_t - q_t.detach()),
-                dim=-1))
-    else:
-        alpha_loss = -torch.mean(model.log_alpha *
-                                 (log_pis_t + model.target_entropy).detach())
-        # Note: Do not detach q_t_det_policy here b/c is depends partly
-        # on the policy vars (policy sample pushed through Q-net).
-        # However, we must make sure `actor_loss` is not used to update
-        # the Q-net(s)' variables.
-        actor_loss = torch.mean(alpha.detach() * log_pis_t - q_t_det_policy)
-
-    # Save for stats function.
-    policy.q_t = q_t
-    policy.policy_t = policy_t
-    policy.log_pis_t = log_pis_t
-    policy.td_error = td_error
-    policy.actor_loss = actor_loss
-    policy.critic_loss = critic_loss
-    policy.alpha_loss = alpha_loss
-    policy.log_alpha_value = model.log_alpha
-    policy.alpha_value = alpha
-    policy.target_entropy = model.target_entropy
-
-    # Return all loss terms corresponding to our optimizers.
-    return tuple([policy.actor_loss] + policy.critic_loss +
-                 [policy.alpha_loss])
-
 
 def stats(policy, train_batch):
     return {
@@ -303,6 +166,7 @@ def stats(policy, train_batch):
         "mean_q": torch.mean(policy.q_t),
         "max_q": torch.max(policy.q_t),
         "min_q": torch.min(policy.q_t),
+        "cpc_loss": torch.mean(policy.cpc_loss),
     }
 
 
@@ -311,12 +175,15 @@ def optimizer_fn(policy, config):
     The 3 or 4 (twin_q=True) optimizers returned here correspond to the
     number of loss terms returned by the loss function.
     """
+    # actor optimizer 
     policy.actor_optim = torch.optim.Adam(
         params=policy.model.policy_variables(),
         lr=config["optimization"]["actor_learning_rate"],
         eps=1e-7,  # to match tf.keras.optimizers.Adam's epsilon default
+        betas=(config["optimization"]["actor_beta"], 0.999)
     )
-
+    
+    # critic optimizer 
     critic_split = len(policy.model.q_variables())
     if config["twin_q"]:
         critic_split //= 2
@@ -326,6 +193,7 @@ def optimizer_fn(policy, config):
             params=policy.model.q_variables()[:critic_split],
             lr=config["optimization"]["critic_learning_rate"],
             eps=1e-7,  # to match tf.keras.optimizers.Adam's epsilon default
+            betas=(config["optimization"]["critic_beta"], 0.999)
         )
     ]
     if config["twin_q"]:
@@ -335,14 +203,30 @@ def optimizer_fn(policy, config):
                 lr=config["optimization"]["critic_learning_rate"],
                 eps=1e-7,  # to match tf.keras.optimizers.Adam's eps default
             ))
+
+    # entropy / alpha optimizer 
     policy.alpha_optim = torch.optim.Adam(
         params=[policy.model.log_alpha],
         lr=config["optimization"]["entropy_learning_rate"],
         eps=1e-7,  # to match tf.keras.optimizers.Adam's epsilon default
+        betas=(config["optimization"]["alpha_beta"], 0.999)
+    )
+
+    # NOTE: customs 
+    # cpc / encoder optimizer 
+    policy.encoder_optim = torch.optim.Adam(
+        params=policy.model.encoder.parameters(),
+        lr=config["optimization"]["encoder_learning_rate"],
+        eps=1e-7,  # to match tf.keras.optimizers.Adam's epsilon default
+    )
+    policy.cpc_optim = torch.optim.Adam(
+        params=policy.curl.parameters(),
+        lr=config["optimization"]["encoder_learning_rate"],
+        eps=1e-7,  # to match tf.keras.optimizers.Adam's epsilon default
     )
 
     return tuple([policy.actor_optim] + policy.critic_optims +
-                 [policy.alpha_optim])
+                 [policy.alpha_optim] + [policy.encoder_optim, policy.cpc_optim])
 
 
 #######################################################################################################
@@ -361,9 +245,16 @@ class ComputeTDErrorMixin:
                 SampleBatch.DONES: done_mask,
                 PRIO_WEIGHTS: importance_weights,
             })
+            # NOTE: use eval mode cropping (center), 64 -> cropped_image_size (54)
+            cur_obs = input_dict[SampleBatch.CUR_OBS].permute(0,3,1,2).float()
+            nxt_obs = input_dict[SampleBatch.NEXT_OBS].permute(0,3,1,2).float()
+
+            input_dict[SampleBatch.CUR_OBS] = self.model.center_crop(cur_obs)
+            input_dict[SampleBatch.NEXT_OBS] = self.model.center_crop(nxt_obs)
+
             # Do forward pass on loss to update td errors attribute
             # (one TD-error value per item in batch to update PR weights).
-            actor_critic_loss(self, self.model, None, input_dict)
+            self.critic_loss(input_dict)
 
             # Self.td_error is set within actor_critic_loss call.
             return self.td_error
@@ -376,27 +267,221 @@ class TargetNetworkMixin:
         # Hard initial update from Q-net(s) to target Q-net(s).
         self.update_target(tau=1.0)
 
+    # def update_target(self, tau=None):
+    #     """ for here, 
+    #     """
+    #     # Update_target_fn will be called periodically to copy Q network to
+    #     # target Q network, using (soft) tau-synching.
+    #     tau = tau or self.config.get("tau")
+    #     model_state_dict = self.model.state_dict()
+    #     # Support partial (soft) synching.
+    #     # If tau == 1.0: Full sync from Q-model to target Q-model.
+    #     if tau != 1.0:
+    #         target_state_dict = self.target_model.state_dict()
+    #         model_state_dict = {
+    #             k: tau * model_state_dict[k] + (1 - tau) * v
+    #             for k, v in target_state_dict.items()
+    #         }
+    #     self.target_model.load_state_dict(model_state_dict)
+
     def update_target(self, tau=None):
-        # Update_target_fn will be called periodically to copy Q network to
-        # target Q network, using (soft) tau-synching.
-        tau = tau or self.config.get("tau")
-        model_state_dict = self.model.state_dict()
-        # Support partial (soft) synching.
+        """ different update rates for different model components
+        """
+        # hard update for initialization
+        if tau is not None:
+            critic_tau = encoder_tau = tau 
+        else:
+            critic_tau = self.config["critic_tau"]
+            encoder_tau = self.config["encoder_tau"]
+        # update Q targets
+        self.soft_update_params(self.model.q_net, self.target_model.q_net, critic_tau)
+        if self.config["twin_q"]:
+            self.soft_update_params(self.model.twin_q_net, self.target_model.twin_q_net, critic_tau)
+        # update encoder 
+        self.soft_update_params(self.model.encoder, self.target_model.encoder, encoder_tau)
+
+    def soft_update_params(self, model, target_model, tau):
+        """ general hard/soft update func
+        """
+        # # reference: https://github.com/MishaLaskin/curl/blob/019a229eb049b9400e97f142f32dd47b4567ba8a/utils.py#L123
+        # for param, target_param in zip(model.parameters(), target_model.parameters()):
+        #     target_param.data.copy_(
+        #         tau * param.data + (1 - tau) * target_param.data
+        #     )
+        model_state_dict = model.state_dict()
         # If tau == 1.0: Full sync from Q-model to target Q-model.
         if tau != 1.0:
-            target_state_dict = self.target_model.state_dict()
+            target_state_dict = target_model.state_dict()
             model_state_dict = {
                 k: tau * model_state_dict[k] + (1 - tau) * v
                 for k, v in target_state_dict.items()
             }
-        self.target_model.load_state_dict(model_state_dict)
+        target_model.load_state_dict(model_state_dict)
 
 
+
+# NOTE: customs 
 class CurlMixin:
     """ methods (overrides) for Contrastive Unsupervised Representations for RL
     """
-    def __init__(self, config):
-        pass 
+    def __init__(self):
+        self.cross_entropy_loss = nn.CrossEntropyLoss()
+        self.POS_OBS = "pos"
+
+        self.actor_update_freq = self.config.get("actor_update_freq", 2) 
+        self.cpc_update_freq = self.config.get("cpc_update_freq", 1)
+
+    @property
+    def alpha(self):
+        """ learnable temperature parameter """
+        return self.model.log_alpha.exp()
+
+    def critic_loss(self, train_batch):
+        """ critic loss based on bellman error 
+        """
+        # get embeddings (already permuted at cropping)
+        model_out_t, _ = self.model.get_embeddings({
+            "obs": train_batch[SampleBatch.CUR_OBS],
+            "is_training": True
+        }, [], None, permute=False)
+
+        model_out_tp1, _ = self.model.get_embeddings({
+            "obs": train_batch[SampleBatch.NEXT_OBS],
+            "is_training": True
+        }, [], None, permute=False)
+
+        target_model_out_tp1, _ = self.target_model.get_embeddings({
+            "obs": train_batch[SampleBatch.NEXT_OBS],
+            "is_training": True
+        }, [], None, permute=False)
+
+        # Get all action probs directly from pi and form their logp.
+        # action & logprob for cur_obs 
+        log_pis_t = F.log_softmax(self.model.get_policy_output(model_out_t), dim=-1)
+        policy_t = torch.exp(log_pis_t)
+        # action & logprob for nxt_obs 
+        log_pis_tp1 = F.log_softmax(self.model.get_policy_output(model_out_tp1), -1)
+        policy_tp1 = torch.exp(log_pis_tp1)
+
+        # Q-values for cur_obs (discrete)
+        q_t = self.model.get_q_values(model_out_t)       
+        # Target Q-values for nxt_obs (discrete)
+        q_tp1 = self.target_model.get_q_values(target_model_out_tp1)
+        # double Q values for cur_obs (discrete)
+        if self.config["twin_q"]:
+            twin_q_t = self.model.get_twin_q_values(model_out_t)
+            twin_q_tp1 = self.target_model.get_twin_q_values(target_model_out_tp1)
+            q_tp1 = torch.min(q_tp1, twin_q_tp1)
+        # final Q-values with entropy  
+        # q_tp1 -= self.alpha * log_pis_tp1
+        q_tp1 -= self.alpha.detach() * log_pis_tp1
+
+        # Actually selected Q-values (from the actions batch).
+        one_hot = F.one_hot(
+            train_batch[SampleBatch.ACTIONS], num_classes=q_t.size()[-1])
+        q_t_selected = torch.sum(q_t * one_hot, dim=-1)
+        # actually selected double Q-values 
+        if self.config["twin_q"]:
+            twin_q_t_selected = torch.sum(twin_q_t * one_hot, dim=-1)
+        # Discrete case: "Best" means weighted by the policy (prob) outputs.
+        q_tp1_best = torch.sum(torch.mul(policy_tp1, q_tp1), dim=-1)
+        q_tp1_best_masked = (1.0 - train_batch[SampleBatch.DONES].float()) * q_tp1_best
+
+        # compute RHS of bellman equation
+        q_t_selected_target = (
+            train_batch[SampleBatch.REWARDS] +
+            (self.config["gamma"]**self.config["n_step"]) * q_tp1_best_masked
+        ).detach()
+
+        # Compute the TD-error (potentially clipped).
+        base_td_error = torch.abs(q_t_selected - q_t_selected_target)
+        if self.config["twin_q"]:
+            twin_td_error = torch.abs(twin_q_t_selected - q_t_selected_target)
+            td_error = 0.5 * (base_td_error + twin_td_error)
+        else:
+            td_error = base_td_error
+
+        critic_loss = [
+            0.5 * torch.mean(torch.pow(q_t_selected_target - q_t_selected, 2.0))
+        ]
+        if self.config["twin_q"]:
+            critic_loss.append(0.5 * torch.mean(
+                torch.pow(q_t_selected_target - twin_q_t_selected, 2.0)))
+
+        # save for status function 
+        self.q_t = q_t
+        self.policy_t = policy_t
+        self.log_pis_t = log_pis_t
+        self.td_error = td_error
+        self.critic_loss = critic_loss
+        return critic_loss
+
+    def actor_and_alpha_loss(self, train_batch):
+        """ actor loss based on KL for energy-based policy 
+        """
+        # get embeddings 
+        embed_out = self.model.get_embeddings({
+            "obs": train_batch[SampleBatch.CUR_OBS],
+            "is_training": True
+        }, [], None, permute=False)
+        # detach encoder, so we don't update it with the actor loss
+        model_out_t = embed_out[0].detach()
+
+        # action & logprob for cur_obs 
+        log_pis_t = F.log_softmax(self.model.get_policy_output(model_out_t), dim=-1)
+        policy_t = torch.exp(log_pis_t)
+
+        # Q-values for cur_obs (discrete)
+        q_t = self.model.get_q_values(model_out_t) 
+        if self.config["twin_q"]:
+            twin_q_t = self.model.get_twin_q_values(model_out_t)
+            q_t = torch.min(q_t, twin_q_t)
+        one_hot = F.one_hot(
+            train_batch[SampleBatch.ACTIONS], num_classes=q_t.size()[-1])
+        q_t = torch.sum(q_t * one_hot, dim=-1)
+
+        # Actor loss.
+        actor_loss = torch.mean(torch.sum(
+            torch.mul(
+                # NOTE: No stop_grad around policy output here
+                # (compare with q_t_det_policy for continuous case).
+                policy_t,
+                self.alpha.detach() * log_pis_t - q_t.detach()
+            ), dim=-1
+        ))
+
+        # Discrete case: Multiply the action probs as weights with the original loss terms (no expectations needed).
+        # Note: In the papers, alpha is used directly, here we take the log
+        weighted_log_alpha_loss = policy_t.detach() * (
+            -self.model.log_alpha * (log_pis_t + self.model.target_entropy).detach())
+        # Sum up weighted terms and mean over all batch items.
+        alpha_loss = torch.mean(torch.sum(weighted_log_alpha_loss, dim=-1))
+
+        # Save for stats function.
+        policy.actor_loss = actor_loss
+        policy.alpha_loss = alpha_loss
+        policy.log_alpha_value = self.model.log_alpha
+        policy.alpha_value = self.alpha
+        policy.target_entropy = self.model.target_entropy
+        return actor_loss, alpha_loss
+
+    def cpc_loss(self, train_batch):
+        """ meat for CURL 
+        """
+        # collect positive and negative samples 
+        obs_anchor = train_batch[SampleBatch.CUR_OBS]
+        obs_pos = train_batch[self.POS_OBS]
+
+        z_a = self.curl.encode(obs_anchor, permute=False)
+        z_pos = self.curl.encode(obs_pos, ema=True, permute=False)
+        
+        logits = self.curl.compute_logits(z_a, z_pos)
+        labels = torch.arange(logits.shape[0]).long().to(logits.device)
+        loss = self.cross_entropy_loss(logits, labels)
+        
+        # Save for stats function.
+        policy.cpc_loss = loss 
+        return loss 
 
     @override(TorchPolicy)
     def learn_on_batch(self, postprocessed_batch):
@@ -405,31 +490,88 @@ class CurlMixin:
         # convert to UsageTrackingDict from MultiagentBatch
         train_batch = self._lazy_tensor_dict(postprocessed_batch)
 
-        loss_out = self._loss(self, self.model, self.dist_class, train_batch))
-        critic_loss, actor_loss = loss_out
+        # crop inputs 64 -> cropped_image_size (54)
+        cur_obs = train_batch[SampleBatch.CUR_OBS].permute(0,3,1,2).float()
+        nxt_obs = train_batch[SampleBatch.NEXT_OBS].permute(0,3,1,2).float()
+
+        train_batch[SampleBatch.CUR_OBS] = self.model.random_crop(cur_obs)
+        train_batch[SampleBatch.NEXT_OBS] = self.model.random_crop(nxt_obs)
+        # constrastive positives 
+        train_batch[self.POS_OBS] = self.model.random_crop(cur_obs)
 
         # collect backprop stats
         grad_info = {"allreduce_latency": 0.0}
+        step = self.global_timestep                                                                  
 
-        # loop through each loss and optimizer
-        grads_critic = self._update_critic(critic_loss)
-        grads_actor = self._update_actor(actor_loss)
+        # NOTE: loop through each loss and optimizer
+        # optimize critics
+        critic_loss = self.critic_loss(train_batch)
+        if self.config["twin_q"]:
+            opt1, opt2 = self.critic_optims
+            opt1.zero_grad()
+            opt2.zero_grad()
 
-
-        for i, opt in enumerate(self._optimizers):
-            # Erase gradients in all vars of this optimizer.
-            opt.zero_grad()
-            # Recompute gradients of loss over all variables.
-            loss_out[i].backward(retain_graph=(i < len(self._optimizers) - 1))
-            grad_info.update(self.extra_grad_process(opt, loss_out[i]))
-
-            latency = self.average_grad(opt)
+            critic_loss[0].backward()
+            grad_info.update(self.extra_grad_process(opt1, critic_loss[0]))
+            latency = self.average_grad(opt1)
             grad_info["allreduce_latency"] += latency
 
-            # Step the optimizer.
+            critic_loss[1].backward()
+            grad_info.update(self.extra_grad_process(opt2, critic_loss[1]))
+            latency = self.average_grad(opt2)
+            grad_info["allreduce_latency"] += latency
+
+            opt1.step()
+            opt2.step()
+        else:
+            opt = self.critic_optims[0]
+            opt.zero_grad()
+            critic_loss[0].backward()
+            grad_info.update(self.extra_grad_process(opt, critic_loss[0]))
+            latency = self.average_grad(opt)
+            grad_info["allreduce_latency"] += latency
             opt.step()
 
+        # optimize actor and alpha 
+        if step % self.actor_update_freq == 0:
+            actor_loss, alpha_loss = self.actor_and_alpha_loss(train_batch)
 
+            # optimize actor 
+            self.actor_optim.zero_grad()
+            actor_loss.backward()
+            grad_info.update(self.extra_grad_process(self.actor_optim, actor_loss))
+            latency = self.average_grad(self.actor_optim)
+            grad_info["allreduce_latency"] += latency
+            self.actor_optim.step()
+
+            # optimize alpha 
+            self.alpha_optim.zero_grad()
+            alpha_loss.backward()
+            grad_info.update(self.extra_grad_process(self.alpha_optim, alpha_loss))
+            latency = self.average_grad(self.alpha_optim)
+            grad_info["allreduce_latency"] += latency
+            self.alpha_optim.step()
+        
+        # optimize encoder and CURL 
+        if step % self.cpc_update_freq == 0:
+            cpc_loss = self.cpc_loss(train_batch, grad_info)
+            
+            self.encoder_optim.zero_grad()
+            self.cpc_optim.zero_grad()
+            cpc_loss.backward()
+
+            grad_info.update(self.extra_grad_process(self.encoder_optim, cpc_loss))
+            latency = self.average_grad(self.encoder_optim)
+            grad_info["allreduce_latency"] += latency
+
+            grad_info.update(self.extra_grad_process(self.cpc_optim, cpc_loss))
+            latency = self.average_grad(self.cpc_optim)
+            grad_info["allreduce_latency"] += latency
+
+            self.encoder_optim.step()
+            self.cpc_optim.step()
+
+        # collect other grad info
         grad_info["allreduce_latency"] /= len(self._optimizers)
         grad_info.update(self.extra_grad_info(train_batch))
         return {LEARNER_STATS_KEY: grad_info}
@@ -478,6 +620,7 @@ def setup_late_mixins(policy, obs_space, action_space, config):
     CurlMixin.__init__(policy)
 
 
+
 #######################################################################################################
 #####################################   Policy   #####################################################
 #######################################################################################################
@@ -495,7 +638,7 @@ CurlSACTorchPolicy = build_torch_policy(
     after_init=setup_late_mixins,
     make_model_and_action_dist=build_curl_sac_model_and_action_dist,
     mixins=[TargetNetworkMixin, ComputeTDErrorMixin, CurlMixin],
-    action_distribution_fn=action_distribution_fn,
+    action_distribution_fn=curl_action_distribution_fn,
 )
 
 

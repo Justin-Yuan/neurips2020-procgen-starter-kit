@@ -8,13 +8,59 @@ from ray.rllib.utils.framework import get_activation_fn, try_import_torch
 torch, nn = try_import_torch()
 from models.impala_cnn_torch import ResidualBlock, ConvSequence
 from ray.rllib.utils.annotations import override
-import kornia
+from kornia.augmentation import CenterCrop, RandomCrop
+
+from models import make_encoder
+
 
 #######################################################################################################
 #####################################   Networks   #####################################################
 #######################################################################################################
 
-class 
+# reference: https://github.com/MishaLaskin/curl/blob/master/curl_sac.py
+class CURL(nn.Module):
+    """ contrastive learning part of the model
+    """
+    def __init__(self, z_dim, encoder, encoder_target):
+        super(CURL, self).__init__()
+
+        self.encoder = encoder
+        self.encoder_target = encoder_target
+        self.W = nn.Parameter(torch.rand(z_dim, z_dim))
+ 
+    def encode(self, x, detach=False, ema=False, permute=True):
+        """ Encoder: z_t = e(x_t)
+        Arguments:
+            x: x_t, x y coordinates
+        Returns: 
+            z_t, value in r2
+        """
+        # preprocess input obs if necessary 
+        if permute:
+            x = x.permute(0, 3, 1, 2)  # NHWC => NCHW
+
+        if ema:
+            with torch.no_grad():
+                z_out = self.encoder_target(x)
+        else:
+            z_out = self.encoder(x)
+
+        if detach:
+            z_out = z_out.detach()
+        return z_out
+
+    def compute_logits(self, z_a, z_pos):
+        """
+        Uses logits trick for CURL:
+        - compute (B,B) matrix z_a (W z_pos.T)
+        - positives are all diagonal elements
+        - negatives are all other elements
+        - to compute loss use multiclass cross entropy with identity matrix for labels
+        """
+        Wz = torch.matmul(self.W, z_pos.T)  # (z_dim,B)
+        logits = torch.matmul(z_a, Wz)  # (B,B)
+        logits = logits - torch.max(logits, 1)[0][:, None]
+        return logits
 
 
 
@@ -47,10 +93,12 @@ class CurlSACTorchModel(TorchModelV2, nn.Module):
                  twin_q=False,
                  initial_alpha=1.0,
                  target_entropy=None,
-                 embed_dim = 256,
-                 augmentation=False,
-                 aug_num=2,
-                 max_shift=4,
+                 # customs
+                 embed_dim = 50,
+                 encoder_type="pixel",
+                 num_layers=4,
+                 num_filters=32,
+                 cropped_image_size=54,
                  **kwargs):
         """Initialize variables of this model.
 
@@ -83,16 +131,10 @@ class CurlSACTorchModel(TorchModelV2, nn.Module):
     
         h, w, c = obs_space.shape
         shape = (c, h, w)
-
         # obs embedding 
-        conv_seqs = []
-        for out_channels in [16, 32, 32]:
-            conv_seq = ConvSequence(shape, out_channels)
-            shape = conv_seq.get_output_shape()
-            conv_seqs.append(conv_seq)
-        self.conv_seqs = nn.ModuleList(conv_seqs)
-        self.hidden_fc = nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=embed_dim)
-
+        self.encoder = make_encoder(
+            encoder_type, shape, embed_dim, num_layers, num_filters)
+  
         # Build the policy network.
         self.action_model = nn.Sequential()
         ins = embed_dim
@@ -153,22 +195,17 @@ class CurlSACTorchModel(TorchModelV2, nn.Module):
         self.target_entropy = torch.tensor(
             data=[target_entropy], dtype=torch.float32, requires_grad=False)
 
-        # NOTE: custom fields 
-        self.augmentation = augmentation
-        self.aug_num = aug_num
-        # NOTE: augmentation 
-        if augmentation:
-            obs_shape = obs_space.shape[-2]
-            self.trans = nn.Sequential(
-                nn.ReplicationPad2d(max_shift),
-                kornia.augmentation.RandomCrop((obs_shape, obs_shape))
-            )
-    
+        # NOTE: input cropping 
+        self.cropped_image_size = cropped_image_size
+        self.center_crop = CenterCrop(cropped_image_size)
+        self.random_crop = RandomCrop((cropped_image_size, cropped_image_size))
+
+
     @override(TorchModelV2)
     def forward(self, input_dict, state, seq_lens):
         """ return embedding value
         """
-        x = self.get_embeddings(input_dict, state, seq_lens)
+        x, state = self.get_embeddings(input_dict, state, seq_lens)
         logits = self.get_policy_output(x)
         value = self.get_q_values(x)
         self._value = value.squeeze(1)
@@ -183,16 +220,10 @@ class CurlSACTorchModel(TorchModelV2, nn.Module):
         """ encode observations 
         """
         x = input_dict["obs"].float()
-        x = x / 255.0  # scale to 0-1
         if permute:
             x = x.permute(0, 3, 1, 2)  # NHWC => NCHW
-        for conv_seq in self.conv_seqs:
-            x = conv_seq(x)
-        x = torch.flatten(x, start_dim=1)
-        x = nn.functional.relu(x)
-        x = self.hidden_fc(x)
-        x = nn.functional.relu(x)
-        return x
+        x = self.encoder(x)
+        return x, state
 
     def get_q_values(self, model_out, actions=None):
         """Return the Q estimates for the most recent forward pass.
