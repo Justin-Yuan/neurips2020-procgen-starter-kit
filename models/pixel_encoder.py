@@ -1,7 +1,7 @@
 from ray.rllib.utils import try_import_torch
 
 torch, nn = try_import_torch()
-
+import math 
 
 #######################################################################################################
 #####################################   Helper funcs   #####################################################
@@ -11,11 +11,6 @@ torch, nn = try_import_torch()
 # OUT_DIM = {2: 39, 4: 35, 6: 31}
 # # for 64 x 64 inputs
 OUT_DIM = {2: 29, 4: 25, 6: 21}
-# OUT_DIM = {
-#     84: {2: 39, 4: 35, 6: 31},
-#     64: {2: 29, 4: 25, 6: 21},
-#     54: {2: 29, 4: 25, 6: 21},
-# }
 
 
 def tie_weights(src, trg):
@@ -29,7 +24,8 @@ def tie_weights(src, trg):
 #######################################################################################################
 
 class PixelEncoder(nn.Module):
-    """Convolutional encoder of pixels observations."""
+    """ Convolutional encoder of pixels observations.
+    """
     def __init__(self, obs_shape, feature_dim, num_layers=4, num_filters=32):
         super().__init__()
 
@@ -44,11 +40,39 @@ class PixelEncoder(nn.Module):
         for _ in range(num_layers - 1):
             self.convs.append(nn.Conv2d(num_filters, num_filters, 3, stride=1))
 
-        out_dim = OUT_DIM[num_layers]
+        # out_dim = OUT_DIM[num_layers]
+        # NOTE: infer it instead 
+        out_dim = self.get_conv_output_shape(obs_shape, num_filters)[-1]
+        
         self.fc = nn.Linear(num_filters * out_dim * out_dim, self.feature_dim)
         self.ln = nn.LayerNorm(self.feature_dim)
 
         self.outputs = dict()
+
+    def get_conv_output_shape(self, obs_shape, num_filters):
+        """ automatic shape inference after con layers 
+        NOTE: hard-coded for the above specific conv params 
+        """
+        def get_shape(in_shape, kernel, stride, padding, dilation):
+            # infer output shape after 1 layer of conv 
+            # reference: https://pytorch.org/docs/stable/nn.html#torch.nn.Conv2d
+            _, h, w = in_shape
+            out_h = math.floor(
+                (h + 2 * padding - dilation * (kernel - 1) - 1) / float(stride) + 1) 
+            out_w = math.floor(
+                (w + 2 * padding - dilation * (kernel - 1) - 1) / float(stride) + 1) 
+            return (num_filters, out_h, out_w) 
+        
+        shape = obs_shape
+        # NOTE: params (kernel, stride, padding, dilation), default (3,1,0,1)
+        # 1st layer
+        conv_params = (3, 2, 0, 1)
+        shape = get_shape(shape, *conv_params)
+        # other conv layers 
+        conv_params = (3, 1, 0, 1)
+        for _ in range(self.num_layers-1):
+            shape = get_shape(shape, *conv_params)
+        return shape 
 
     def reparameterize(self, mu, logstd):
         std = torch.exp(logstd)
@@ -56,7 +80,6 @@ class PixelEncoder(nn.Module):
         return mu + eps * std
 
     def forward_conv(self, obs):
-
         obs = obs / 255.
         self.outputs['obs'] = obs
 
@@ -72,7 +95,6 @@ class PixelEncoder(nn.Module):
 
     def forward(self, obs, detach=False):
         hid = self.forward_conv(obs)
-
         if detach:
             hid = hid.detach()
             
@@ -87,7 +109,6 @@ class PixelEncoder(nn.Module):
 
         out = torch.tanh(h_norm)
         self.outputs['tanh'] = out
-
         return out
 
     def copy_conv_weights_from(self, source):
@@ -111,6 +132,7 @@ class PixelEncoder(nn.Module):
         L.log_param('train_encoder/ln', self.ln, step)
 
 
+
 class IdentityEncoder(nn.Module):
     def __init__(self, obs_shape, feature_dim, num_layers, num_filters):
         super().__init__()
@@ -129,18 +151,16 @@ class IdentityEncoder(nn.Module):
 
 
 
-
-
 #######################################################################################################
 #####################################   Misc   #####################################################
 #######################################################################################################
-# to infer OUT_DIM sizes 
 
 if __name__ == "__main__":
-    obs_shape = ()
+
+    # test infering OUT_DIM sizes 
+    obs_shape = (3,64,64)
     feature_dim = 128
-    net = PixelEncoder(obs_shape, feature_dim, num_layers=4)
-    x = torch.ones(2, *obs_shape)
+    num_layers = 4
     
-    import ipdb; ipdb.set_trace()
+    net = PixelEncoder(obs_shape, feature_dim, num_layers=num_layers)    
     print("test done ...")
