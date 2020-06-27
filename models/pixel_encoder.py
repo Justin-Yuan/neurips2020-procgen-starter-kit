@@ -1,7 +1,8 @@
 from ray.rllib.utils import try_import_torch
-
 torch, nn = try_import_torch()
-import math 
+
+from utils.utils import get_conv_output_shape
+
 
 #######################################################################################################
 #####################################   Helper funcs   #####################################################
@@ -42,36 +43,26 @@ class PixelEncoder(nn.Module):
 
         # out_dim = OUT_DIM[num_layers]
         # NOTE: infer it instead 
-        out_dim = self.get_conv_output_shape(obs_shape, num_filters)[-1]
+        out_dim = self.get_pre_fc_shape(obs_shape, num_filters)[-1]
         
         self.fc = nn.Linear(num_filters * out_dim * out_dim, self.feature_dim)
         self.ln = nn.LayerNorm(self.feature_dim)
 
         self.outputs = dict()
 
-    def get_conv_output_shape(self, obs_shape, num_filters):
+    def get_pre_fc_shape(self, obs_shape, num_filters):
         """ automatic shape inference after con layers 
         NOTE: hard-coded for the above specific conv params 
         """
-        def get_shape(in_shape, kernel, stride, padding, dilation):
-            # infer output shape after 1 layer of conv 
-            # reference: https://pytorch.org/docs/stable/nn.html#torch.nn.Conv2d
-            _, h, w = in_shape
-            out_h = math.floor(
-                (h + 2 * padding - dilation * (kernel - 1) - 1) / float(stride) + 1) 
-            out_w = math.floor(
-                (w + 2 * padding - dilation * (kernel - 1) - 1) / float(stride) + 1) 
-            return (num_filters, out_h, out_w) 
-        
         shape = obs_shape
         # NOTE: params (kernel, stride, padding, dilation), default (3,1,0,1)
         # 1st layer
-        conv_params = (3, 2, 0, 1)
-        shape = get_shape(shape, *conv_params)
+        conv_params = (3, 2, 0, 1, num_filters)
+        shape = get_conv_output_shape(shape, *conv_params)
         # other conv layers 
-        conv_params = (3, 1, 0, 1)
+        conv_params = (3, 1, 0, 1, num_filters)
         for _ in range(self.num_layers-1):
-            shape = get_shape(shape, *conv_params)
+            shape = get_conv_output_shape(shape, *conv_params)
         return shape 
 
     def reparameterize(self, mu, logstd):
