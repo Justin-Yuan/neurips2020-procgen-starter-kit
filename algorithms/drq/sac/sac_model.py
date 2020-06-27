@@ -179,7 +179,7 @@ class DrqSACTorchModel(TorchModelV2, nn.Module):
         # x = x / 255.0  # scale to 0-1
         if permute:
             x = x.permute(0, 3, 1, 2)  # NHWC => NCHW
-       x = self.encoder(x)
+        x = self.encoder(x)
         return x, state
 
     def get_q_values(self, model_out, actions=None):

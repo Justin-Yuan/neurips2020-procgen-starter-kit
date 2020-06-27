@@ -725,15 +725,15 @@ class SACAEMixin:
                 # Step the optimizer.
                 opt.step()
         # handle ae_loss and encoder/decoder optims
-        decoder_optimizer = self.optimizers[-1]
-        encoder_optimizer = self.optimizers[-2]
+        decoder_optimizer = self._optimizers[-1]
+        encoder_optimizer = self._optimizers[-2]
         loss = loss_out[-1]
         encoder_optimizer.zero_grad()
         decoder_optimizer.zero_grad()
         loss.backward()
 
-        self.encoder_optimizer.step()
-        self.decoder_optimizer.step()
+        encoder_optimizer.step()
+        decoder_optimizer.step()
 
         grad_info["allreduce_latency"] /= len(self._optimizers)
         grad_info.update(self.extra_grad_info(train_batch))
