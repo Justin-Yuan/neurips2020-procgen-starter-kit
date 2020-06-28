@@ -376,18 +376,18 @@ def optimizer_fn(policy, config):
             lr=policy.cur_lr,
             # eps=1e-7,  # to match tf.keras.optimizers.Adam's epsilon default
             eps=config["adam_epsilon"],
-            betas=(config["optimization"]["critic_beta"], 0.999)
+            betas=(config["critic_beta"], 0.999)
         )
 
     # cpc / encoder optimizer 
     policy.encoder_optim = torch.optim.Adam(
         params=policy.q_model.encoder.parameters(),
-        lr=config["optimization"]["encoder_learning_rate"],
+        lr=config["encoder_learning_rate"],
         eps=1e-7,  # to match tf.keras.optimizers.Adam's epsilon default
     )
     policy.cpc_optim = torch.optim.Adam(
         params=policy.curl.parameters(),
-        lr=config["optimization"]["encoder_learning_rate"],
+        lr=config["encoder_learning_rate"],
         eps=1e-7,  # to match tf.keras.optimizers.Adam's epsilon default
     )
 

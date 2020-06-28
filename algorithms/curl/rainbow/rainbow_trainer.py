@@ -269,13 +269,36 @@ learning_starts: 1600
 """
 
 # here we use efficient rainbow with partial params from rllib rainbow
+new_config = {
+
+    "num_atoms": 51,
+    "noisy": True,
+    "double_q": True,
+    "dueling": True,
+    "n_step": 20,
+    "learning_starts": 1600,
+    
+    # "critic_learning_rate": 1e-3,
+    "lr": 1e-3,
+    "critic_beta": 0.9,
+    "encoder_learning_rate": 1e-3, 
+    # "adam_epsilon": 1e-7,
+
+    "cpc_update_freq": 1,
+    "target_network_update_freq": 2,
+
+    "critic_tau": 0.01,
+    "encoder_tau": 0.05,
+
+    "train_batch_size": 32,
+    "gamma": 0.99,
+
+    # customs 
+    "embed_dim": 128,
+    "cropped_image_size": 54,
+}
 rainbow_config = DEFAULT_CONFIG.copy()
-rainbow_config["num_atoms"] = 51
-rainbow_config["noisy"] = True
-rainbow_config["double_q"] = True
-rainbow_config["dueling"] = True
-rainbow_config["n_step"] = 20
-rainbow_config["learning_starts"] = 1600
+rainbow_config.update(new_config)
 
 
 DrqRainbowTrainer = GenericOffPolicyTrainer.with_updates(
