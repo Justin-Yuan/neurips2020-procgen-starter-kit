@@ -160,12 +160,8 @@ class DrqSACTorchModel(TorchModelV2, nn.Module):
         """ return embedding value
         """
         x, state = self.get_embeddings(input_dict, state, seq_lens)
-        logits = self.get_policy_output(x)
-        # only need value during training 
-        if input_dict["is_training"]:
-            value = self.get_q_values(x)
-            self._value = value.squeeze(1)
-        return logits, state
+        # logits = self.get_policy_output(x)
+        return x, state
 
     @override(TorchModelV2)
     def value_function(self):

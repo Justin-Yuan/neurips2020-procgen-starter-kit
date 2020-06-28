@@ -82,12 +82,6 @@ DEFAULT_CONFIG = with_common_config({
     # Whether to fake GPUs (using CPUs).
     # Set this to True for debugging on non-GPU machines (set `num_gpus` > 0).
     "_fake_gpus": False,
-       # === Customs ===
-        ################################################
-        ################################################
-    "augmentation": True,
-    "aug_num": 2,
-    "max_shift": 4, 
 })
 # __sphinx_doc_end__
 # yapf: enable
@@ -222,12 +216,22 @@ def execution_plan(workers, config):
 #####################################   Trainer   #####################################################
 #######################################################################################################
 
-# create two policy, one for aug, one for no aug in get_policy_class 
-# according to config
+new_config = {
+    # customs
+    "embed_dim": 256,
+    "encoder_type": "impala",
+
+    "augmentation": True,
+    "aug_num": 2,
+    "max_shift": 4,
+}
+PPO_CONFIG = DEFAULT_CONFIG.copy()
+PPO_CONFIG.update(new_config)
+
 
 DrqPPOTrainer = build_trainer(
     name="DrqPPO",
-    default_config=DEFAULT_CONFIG,
+    default_config=PPO_CONFIG,
     default_policy=DrqPPOTorchPolicy,
     get_policy_class=get_policy_class,
     execution_plan=execution_plan,

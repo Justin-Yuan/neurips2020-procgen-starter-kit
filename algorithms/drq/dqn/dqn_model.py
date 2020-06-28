@@ -39,10 +39,10 @@ class DrqDQNTorchModel(TorchModelV2, nn.Module):
             add_layer_norm=False,
             #  customs 
             embed_dim = 256,
+            encoder_type="impala",
             augmentation=False,
             aug_num=2,
             max_shift=4,
-            encoder_type="impala",
             **kwargs):
         """Initialize variables of this model.
         Extra model kwargs:

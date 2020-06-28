@@ -79,6 +79,9 @@ def build_drq_sac_model(policy, obs_space, action_space, config):
         twin_q=config["twin_q"],
         initial_alpha=config["initial_alpha"],
         target_entropy=config["target_entropy"],
+        # customs 
+        embed_dim =config["embed_dim"],
+        encoder_type=config["encoder_type"],
         augmentation=config["augmentation"],
         aug_num=config["aug_num"],
         max_shift=config["max_shift"]) 
@@ -97,6 +100,9 @@ def build_drq_sac_model(policy, obs_space, action_space, config):
         twin_q=config["twin_q"],
         initial_alpha=config["initial_alpha"],
         target_entropy=config["target_entropy"],
+        # customs 
+        embed_dim =config["embed_dim"],
+        encoder_type=config["encoder_type"],
         augmentation=config["augmentation"],
         aug_num=config["aug_num"],
         max_shift=config["max_shift"])
@@ -126,19 +132,11 @@ def action_distribution_fn(policy,
                            explore=None,
                            timestep=None,
                            is_training=None):
-    ################################################################################################
-    # model_out, _ = model({
-    #     "obs": obs_batch,
-    #     "is_training": is_training,
-    # }, [], None)
-    # distribution_inputs = model.get_policy_output(model_out)
-
-    # NOTE: model forward output logits directly 
-    distribution_inputs, _ = model({
+    model_out, _ = model({
         "obs": obs_batch,
         "is_training": is_training,
     }, [], None)
-    ################################################################################################
+    distribution_inputs = model.get_policy_output(model_out)
     action_dist_class = get_dist_class(policy.config, policy.action_space)
 
     return distribution_inputs, action_dist_class, []
@@ -578,7 +576,8 @@ NoAugSACTorchPolicy = build_torch_policy(
     make_model_and_action_dist=build_sac_model_and_action_dist,
     action_distribution_fn=action_distribution_fn,
     # shared
-    get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
+    # get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
+    get_default_config=lambda: algorithms.drq.sac.sac_trainer.SAC_CONFIG,
     stats_fn=stats,
     postprocess_fn=postprocess_trajectory,
     extra_grad_process_fn=apply_grad_clipping,
@@ -593,7 +592,8 @@ DrqSACTorchPolicy = build_torch_policy(
     make_model_and_action_dist=build_sac_model_and_action_dist,
     action_distribution_fn=action_distribution_fn,
     # shared
-    get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
+    # get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
+    get_default_config=lambda: algorithms.drq.sac.sac_trainer.SAC_CONFIG,
     stats_fn=stats,
     postprocess_fn=postprocess_trajectory,
     extra_grad_process_fn=apply_grad_clipping,

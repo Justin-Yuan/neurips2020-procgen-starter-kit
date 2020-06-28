@@ -24,11 +24,12 @@ class DrqPPOTorchModel(TorchModelV2, nn.Module):
                 num_outputs,
                 model_config,
                 name,
+                # customs 
                 embed_dim = 256,
+                encoder_type="impala",
                 augmentation=False,
                 aug_num=2,
                 max_shift=4,
-                encoder_type="impala",
                 **kwargs):
         TorchModelV2.__init__(self, obs_space, action_space,
                                             num_outputs, model_config, name)

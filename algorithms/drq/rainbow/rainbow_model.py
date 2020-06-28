@@ -43,15 +43,15 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
             #  Exploration type and do not have any LayerNorm layers in
             #  the net.
             add_layer_norm=False,
-            # customs
-            embed_dim = 256,
             num_atoms=1,
             v_min=-10.0,
             v_max=10.0,
+            # customs
+            embed_dim = 256,
+            encoder_type="impala",
             augmentation=False,
             aug_num=2,
             max_shift=4,
-            encoder_type="impala",
             **kwargs):
         """Initialize variables of this model.
         Extra model kwargs:
@@ -210,10 +210,8 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
         """ return action logits/scores # return embedding value
         """
         x, state = self.get_embeddings(input_dict, state, seq_lens)
-        # logits = self.get_policy_output(x)
-        # logits = self.get_advantages_or_q_values(x)
-        logits = self.get_advantages_or_q_values(x)[0]
-        return logits, state
+        # logits = self.get_advantages_or_q_values(x)[0]
+        return x, state
 
     def get_embeddings(self, input_dict, state, seq_lens, permute=True):
         """ encode observations 
@@ -224,15 +222,6 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
         x = self.encoder(x)
         return x, state
 
-    def sample_noise(self):
-        if not self.no_noise:
-            self.fc_actor.sample_noise()
-            self.fc_critic.sample_noise()
-
-    def remove_noise(self):
-        if not self.no_noise:
-            self.fc_actor.remove_noise()
-            self.fc_critic.remove_noise()
 
 
 #######################################################################################################
