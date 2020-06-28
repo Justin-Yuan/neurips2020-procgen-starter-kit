@@ -2,8 +2,8 @@ from ray.rllib.agents.trainer import with_common_config
 from ray.rllib.agents.dqn.dqn import GenericOffPolicyTrainer
 from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 
-# from ray.rllib.agents.sac.sac_torch_policy import SACTorchPolicy
 from algorithms.curl.sac.sac_policy import CurlSACTorchPolicy
+
 
 #######################################################################################################
 #####################################   Config Template   #####################################################
@@ -141,7 +141,7 @@ def validate_config(config):
         config["grad_clip"] = config.pop("grad_norm_clipping")
 
     # Use same keys as for standard Trainer "model" config.
-    for model in ["Q_model", "policy_model"]: 0
+    for model in ["Q_model", "policy_model"]: 
         if config[model].get("hidden_activation", DEPRECATED_VALUE) != \
                 DEPRECATED_VALUE:
             deprecation_warning(
@@ -154,6 +154,11 @@ def validate_config(config):
                 "{}.hidden_layer_sizes".format(model),
                 "{}.fcnet_hiddens".format(model),
                 error=True)
+
+
+def get_sac_policy_class(config):        
+    return CurlSACTorchPolicy
+
 
 #######################################################################################################
 #####################################   Trainer   #####################################################
@@ -211,19 +216,22 @@ new_config = {
 
     # customs 
     "embed_dim": 128,
+    "encoder_type": "pixel",
+    "num_layers": 4,
+    "num_filters": 32,
     "cropped_image_size": 54,
 }
-curl_config = DEFAULT_CONFIG.copy()
-curl_config.update(new_config)
+SAC_CONFIG = DEFAULT_CONFIG.copy()
+SAC_CONFIG.update(new_config)
 
 
 
 CurlSACTrainer = GenericOffPolicyTrainer.with_updates(
     name="CurlSAC",
-    default_config=curl_config,
+    default_config=SAC_CONFIG,
     validate_config=validate_config,
     default_policy=CurlSACTorchPolicy,
-    get_policy_class=lambda x: CurlSACTorchPolicy,
+    get_policy_class=get_sac_policy_class
 )
 
 

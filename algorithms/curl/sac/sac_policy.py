@@ -18,6 +18,7 @@ from ray.rllib.utils.error import UnsupportedSpaceException
 from ray.rllib.utils.annotations import override
 from ray.rllib.policy.policy import Policy, LEARNER_STATS_KEY
 from ray.rllib.policy.torch_policy import TorchPolicy
+
 from algorithms.curl.sac.sac_model import CurlSACTorchModel, CURL
 from utils.utils import update_model_params
 
@@ -69,10 +70,11 @@ def build_curl_sac_model(policy, obs_space, action_space, config):
         twin_q=config["twin_q"],
         initial_alpha=config["initial_alpha"],
         target_entropy=config["target_entropy"],
+        # customs 
         embed_dim=config["embed_dim"],
-        encoder_type="pixel",
-        num_layers=4,
-        num_filters=32,
+        encoder_type=config["encoder_type"],
+        num_layers=config["num_layers"],
+        num_filters=config["num_filters"],
         cropped_image_size=config["cropped_image_size"]) 
 
     # target 
@@ -89,10 +91,11 @@ def build_curl_sac_model(policy, obs_space, action_space, config):
         twin_q=config["twin_q"],
         initial_alpha=config["initial_alpha"],
         target_entropy=config["target_entropy"],
+        # customs 
         embed_dim=config["embed_dim"],
-        encoder_type="pixel",
-        num_layers=4,
-        num_filters=32,
+        encoder_type=config["encoder_type"],
+        num_layers=config["num_layers"],
+        num_filters=config["num_filters"],
         cropped_image_size=config["cropped_image_size"]) 
 
     # NOTE: customs 
@@ -254,6 +257,7 @@ class ComputeTDErrorMixin:
 
             # Do forward pass on loss to update td errors attribute
             # (one TD-error value per item in batch to update PR weights).
+            # build_q_losses(self, self.model, None, input_dict)
             self.critic_loss(input_dict)
 
             # Self.td_error is set within actor_critic_loss call.
@@ -611,7 +615,8 @@ CurlSACTorchPolicy = build_torch_policy(
     name="CurlSACTorchPolicy",
     # loss updates shifted to policy.learn_on_batch
     loss_fn=None,
-    get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
+    # get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
+    get_default_config=lambda: algorithms.curl.sac.sac_trainer.SAC_CONFIG,
     stats_fn=stats,
     # called in a torch.no_grad scope, calls loss func again to update td error 
     postprocess_fn=postprocess_trajectory,
@@ -623,13 +628,4 @@ CurlSACTorchPolicy = build_torch_policy(
     mixins=[TargetNetworkMixin, ComputeTDErrorMixin, CurlMixin],
     action_distribution_fn=curl_action_distribution_fn,
 )
-
-
-
-
-# https://github.com/ray-project/ray/blob/4ed796a7d63f87a5673af206fdfe09e95e7a9c88/rllib/policy/policy.py
-# policy.global_timestep
-
-# trainer.optimizer.num_steps_sampled
-
 

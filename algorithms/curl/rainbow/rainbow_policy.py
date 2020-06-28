@@ -55,13 +55,13 @@ def build_q_model_and_distribution(policy, obs_space, action_space, config):
         isinstance(getattr(policy, "exploration", None), ParameterNoise)
         or config["exploration_config"]["type"] == "ParameterNoise")
 
-    policy.q_model = DrqRainbowTorchModel(
+    policy.q_model = CurlRainbowTorchModel(
         obs_space=obs_space,
         action_space=action_space,
         num_outputs=num_outputs,
         model_config=config["model"],
         # name=Q_SCOPE,
-        name="dqn_model",
+        name="rainbow_model",
         dueling=config["dueling"],
         q_hiddens=config["hiddens"],
         use_noisy=config["noisy"],
@@ -74,9 +74,9 @@ def build_q_model_and_distribution(policy, obs_space, action_space, config):
         v_max=config["v_max"],
         # customs 
         embed_dim=config["embed_dim"],
-        encoder_type="pixel",
-        num_layers=4,
-        num_filters=32,
+        encoder_type=config["encoder_type"],
+        num_layers=config["num_layers"],
+        num_filters=config["num_filters"],
         cropped_image_size=config["cropped_image_size"]
     )
 
@@ -84,13 +84,13 @@ def build_q_model_and_distribution(policy, obs_space, action_space, config):
     # only for Q net params (excluding encoder params)
     policy.q_func_vars = policy.q_model.q_variables()
 
-    policy.target_q_model = DrqRainbowTorchModel(
+    policy.target_q_model = CurlRainbowTorchModel(
         obs_space=obs_space,
         action_space=action_space,
         num_outputs=num_outputs,
         model_config=config["model"],
         # name=Q_TARGET_SCOPE,
-        name="target_dqn_model",
+        name="target_rainbow_model",
         dueling=config["dueling"],
         q_hiddens=config["hiddens"],
         use_noisy=config["noisy"],
@@ -103,9 +103,9 @@ def build_q_model_and_distribution(policy, obs_space, action_space, config):
         v_max=config["v_max"],
         # customs 
         embed_dim=config["embed_dim"],
-        encoder_type="pixel",
-        num_layers=4,
-        num_filters=32,
+        encoder_type=config["encoder_type"],
+        num_layers=config["num_layers"],
+        num_filters=config["num_filters"],
         cropped_image_size=config["cropped_image_size"]
     )
 
@@ -626,7 +626,8 @@ CurlRainbowTorchPolicy = build_torch_policy(
     action_distribution_fn=get_distribution_inputs_and_class,
     optimizer_fn=optimizer_fn,
     # shared 
-    get_default_config=lambda: ray.rllib.agents.dqn.dqn.DEFAULT_CONFIG,
+    # get_default_config=lambda: ray.rllib.agents.dqn.dqn.DEFAULT_CONFIG,
+    get_default_config=lambda: algorithms.curl.rainbow.rainbow_trainer.RAINBOW_CONFIG,
     stats_fn=build_q_stats,
     postprocess_fn=postprocess_nstep_and_prio,
     extra_grad_process_fn=grad_process_and_td_error_fn,
