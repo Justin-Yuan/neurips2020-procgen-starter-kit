@@ -218,7 +218,9 @@ class ComputeTDErrorMixin:
             input_dict[PRIO_WEIGHTS] = importance_weights
 
             # Do forward pass on loss to update td error attribute
-            build_q_losses(self, self.model, None, input_dict)
+            # build_q_losses(self, self.model, None, input_dict)
+            # NOTE: customs but not sure if works 
+            self._loss(self, self.model, None, input_dict)
 
             return self.q_loss.td_error
 

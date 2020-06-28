@@ -8,8 +8,8 @@ from ray.rllib.utils.framework import get_activation_fn, try_import_torch
 torch, nn = try_import_torch()
 from models.impala_cnn_torch import ResidualBlock, ConvSequence
 from ray.rllib.utils.annotations import override
-import kornia
 
+from kornia.augmentation import RandomCrop
 from models import make_encoder
 
 
@@ -55,7 +55,7 @@ class DrqPPOTorchModel(TorchModelV2, nn.Module):
             obs_shape = obs_space.shape[-2]
             self.trans = nn.Sequential(
                 nn.ReplicationPad2d(max_shift),
-                kornia.augmentation.RandomCrop((obs_shape, obs_shape))
+                RandomCrop((obs_shape, obs_shape))
             )
         
     @override(TorchModelV2)

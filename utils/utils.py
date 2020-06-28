@@ -29,32 +29,6 @@ def mkdirs(*paths):
 ####################################     Model Utils   ##################################
 #########################################################################################
 
-# https://github.com/ikostrikov/pytorch-ddpg-naf/blob/master/ddpg.py#L11
-def soft_update(target, source, tau):
-    """
-    Perform DDPG soft update (move target params toward source based on weight
-    factor tau)
-    Inputs:
-        target (torch.nn.Module): Net to copy parameters to
-        source (torch.nn.Module): Net whose parameters to copy
-        tau (float, 0 < x < 1): Weight factor for update
-    """
-    for target_param, param in zip(target.parameters(), source.parameters()):
-        target_param.data.copy_(target_param.data * (1.0 - tau) + param.data * tau)
-
-
-# https://github.com/ikostrikov/pytorch-ddpg-naf/blob/master/ddpg.py#L15
-def hard_update(target, source):
-    """
-    Copy network parameters from source to target
-    Inputs:
-        target (torch.nn.Module): Net to copy parameters to
-        source (torch.nn.Module): Net whose parameters to copy
-    """
-    for target_param, param in zip(target.parameters(), source.parameters()):
-        target_param.data.copy_(param.data)
-
-
 def get_conv_output_shape(in_shape, kernel, stride=1, padding=0, dilation=1, out_channels=32):
     """ infer output shape after 1 layer of conv 
     reference: https://pytorch.org/docs/stable/nn.html#torch.nn.Conv2d
@@ -66,6 +40,44 @@ def get_conv_output_shape(in_shape, kernel, stride=1, padding=0, dilation=1, out
         (w + 2 * padding - dilation * (kernel - 1) - 1) / float(stride) + 1) 
     return (out_channels, out_h, out_w) 
 
+
+def update_params(src_params, target_params, tau=1.0):
+    """ inputs are params directly
+    reference: https://github.com/MishaLaskin/curl/blob/019a229eb049b9400e97f142f32dd47b4567ba8a/utils.py#L123
+    """
+    if tau != 1.0:  # soft update 
+        for param, target_param in zip(src_params, target_params):
+            target_param.data.copy_(
+                tau * param.data + (1 - tau) * target_param.data)   
+    else:   # hard update 
+        for param, target_param in zip(src_params, target_params):
+            target_param.data.copy_(param.data) 
+
+
+def update_model_params(model, target_model, tau=1.0):
+    """ general hard/soft update func, inputs are models 
+    """
+    # # Version 1
+    # # reference: https://github.com/MishaLaskin/curl/blob/019a229eb049b9400e97f142f32dd47b4567ba8a/utils.py#L123
+    # if tau != 1.0:  # soft update 
+    #     for param, target_param in zip(model.parameters(), target_model.parameters()):
+    #         target_param.data.copy_(
+    #             tau * param.data + (1 - tau) * target_param.data)   
+    # else:   # hard update 
+    #     for param, target_param in zip(model.parameters(), target_model.parameters()):
+    #         target_param.data.copy_(param.data)  
+
+    # Version 2 
+    # reference: https://github.com/ray-project/ray/blob/master/rllib/agents/sac/sac_torch_policy.py
+    model_state_dict = model.state_dict()
+    # If tau == 1.0: Full sync from Q-model to target Q-model.
+    if tau != 1.0:
+        target_state_dict = target_model.state_dict()
+        model_state_dict = {
+            k: tau * model_state_dict[k] + (1 - tau) * v
+            for k, v in target_state_dict.items()
+        }
+    target_model.load_state_dict(model_state_dict)
 
 
 ##########################################################################################

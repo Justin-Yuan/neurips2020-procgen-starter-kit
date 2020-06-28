@@ -7,6 +7,7 @@ from ray.rllib.utils.annotations import override
 
 torch, nn = try_import_torch()
 
+from kornia.augmentation import RandomCrop
 from models import make_encoder
 
 
@@ -142,7 +143,7 @@ class DrqDQNTorchModel(TorchModelV2, nn.Module):
             obs_shape = obs_space.shape[-2]
             self.trans = nn.Sequential(
                 nn.ReplicationPad2d(max_shift),
-                kornia.augmentation.RandomCrop((obs_shape, obs_shape))
+                RandomCrop((obs_shape, obs_shape))
             )
 
     def get_advantages_or_q_values(self, model_out):

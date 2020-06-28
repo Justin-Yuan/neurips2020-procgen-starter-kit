@@ -529,7 +529,9 @@ class ComputeTDErrorMixin:
             })
             # Do forward pass on loss to update td errors attribute
             # (one TD-error value per item in batch to update PR weights).
-            actor_critic_loss(self, self.model, None, input_dict)
+            # actor_critic_loss(self, self.model, None, input_dict)
+            # NOTE: customs but not sure if works 
+            self._loss(self, self.model, None, input_dict)
 
             # Self.td_error is set within actor_critic_loss call.
             return self.td_error

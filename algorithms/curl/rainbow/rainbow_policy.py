@@ -5,7 +5,7 @@ from ray.rllib.agents.dqn.dqn_tf_policy import postprocess_nstep_and_prio, \
     PRIO_WEIGHTS, Q_SCOPE, Q_TARGET_SCOPE
 from ray.rllib.agents.a3c.a3c_torch_policy import apply_grad_clipping
 from ray.rllib.agents.dqn.dqn_torch_model import DQNTorchModel
-from ray.rllib.agents.dqn.simple_q_torch_policy import TargetNetworkMixin
+# from ray.rllib.agents.dqn.simple_q_torch_policy import TargetNetworkMixin
 from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.models.catalog import ModelCatalog
 from ray.rllib.models.torch.torch_action_dist import TorchCategorical
@@ -22,7 +22,12 @@ if nn:
     F = nn.functional
 
 # customs 
-from algorithms.drq.rainbow.rainbow_model import DrqRainbowTorchModel
+from ray.rllib.utils.annotations import override
+from ray.rllib.policy.policy import Policy, LEARNER_STATS_KEY
+from ray.rllib.policy.torch_policy import TorchPolicy
+from algorithms.curl.rainbow.rainbow_model import CurlRainbowTorchModel
+from algorithms.curl.sac.sac_model import CURL
+from utils.utils import update_params, update_model_params
 
 
 #######################################################################################################
@@ -67,12 +72,17 @@ def build_q_model_and_distribution(policy, obs_space, action_space, config):
         num_atoms=config["num_atoms"],
         v_min=config["v_min"],
         v_max=config["v_max"],
-        augmentation=config["augmentation"],
-        aug_num=config["aug_num"],
-        max_shift=config["max_shift"]
+        # customs 
+        embed_dim=config["embed_dim"],
+        encoder_type="pixel",
+        num_layers=4,
+        num_filters=32,
+        cropped_image_size=config["cropped_image_size"]
     )
 
-    policy.q_func_vars = policy.q_model.variables()
+    # policy.q_func_vars = policy.q_model.variables()
+    # only for Q net params (excluding encoder params)
+    policy.q_func_vars = policy.q_model.q_variables()
 
     policy.target_q_model = DrqRainbowTorchModel(
         obs_space=obs_space,
@@ -91,12 +101,23 @@ def build_q_model_and_distribution(policy, obs_space, action_space, config):
         num_atoms=config["num_atoms"],
         v_min=config["v_min"],
         v_max=config["v_max"],
-        augmentation=config["augmentation"],
-        aug_num=config["aug_num"],
-        max_shift=config["max_shift"]
+        # customs 
+        embed_dim=config["embed_dim"],
+        encoder_type="pixel",
+        num_layers=4,
+        num_filters=32,
+        cropped_image_size=config["cropped_image_size"]
     )
 
-    policy.target_q_func_vars = policy.target_q_model.variables()
+    # policy.target_q_func_vars = policy.target_q_model.variables()
+    policy.target_q_func_vars = policy.target_q_model.q_variables()
+
+    # NOTE: customs 
+    policy.curl = CURL(
+        policy.q_model.embed_dim,
+        policy.q_model.encoder,
+        policy.target_q_model.encoder 
+    )
 
     return policy.q_model, TorchCategorical
 
@@ -108,7 +129,11 @@ def get_distribution_inputs_and_class(policy,
                                       explore=True,
                                       is_training=False,
                                       **kwargs):
-    q_vals = compute_rainbow_q_values(policy, model, obs_batch, explore, is_training)
+    # crop input 
+    cropped_obs_batch = model.center_crop(
+        obs_batch.permute(0,3,1,2).float()
+    )
+    q_vals = compute_rainbow_q_values(policy, model, cropped_obs_batch, explore, is_training)
     q_vals = q_vals[0] if isinstance(q_vals, tuple) else q_vals
 
     policy.q_values = q_vals
@@ -140,7 +165,7 @@ def compute_rainbow_q_values(policy, model, obs, explore, is_training=False):
     model_out, state = model.get_embeddings({
         SampleBatch.CUR_OBS: obs,
         "is_training": is_training,
-    }, [], None)
+    }, [], None, permute=False)     # already permuted from cropping
 
     out = model.get_advantages_or_q_values(model_out)
     if config["num_atoms"] > 1:
@@ -334,114 +359,39 @@ def build_rainbow_q_losses(policy, model, _, train_batch):
     return policy.q_loss.loss
 
 
+# def adam_optimizer(policy, config):
+#     return torch.optim.Adam(
+#         policy.q_func_vars, lr=policy.cur_lr, eps=config["adam_epsilon"])
 
-def build_drq_rainbow_q_losses(policy, model, _, train_batch):
-    """ use input augmentation on Q target and Q updates
+# NOTE: customs 
+def optimizer_fn(policy, config):
+    """Creates all necessary optimizers for SAC learning.
+    The 3 or 4 (twin_q=True) optimizers returned here correspond to the
+    number of loss terms returned by the loss function.
     """
-    config = policy.config
-    aug_num = config["aug_num"]
-    
-    # target q network evalution
-    q_tp1_best_avg = None
-    q_dist_tp1_best_avg = None 
-    orig_nxt_obs = train_batch[SampleBatch.NEXT_OBS].clone()
-
-    for _ in range(aug_num):
-        # augment obs 
-        aug_nxt_obs = model.trans(
-            orig_nxt_obs.permute(0,3,1,2).float()
-        ).permute(0,2,3,1)
-
-        q_tp1, q_logits_tp1, q_dist_tp1 = compute_rainbow_q_values(
-            policy,
-            policy.target_q_model,
-            aug_nxt_obs,
-            explore=False,
-            is_training=True)
-
-        # compute estimate of best possible value starting from state at t + 1
-        if config["double_q"]:
-            q_tp1_using_online_net, q_logits_tp1_using_online_net, \
-            q_dist_tp1_using_online_net = compute_rainbow_q_values(
-                policy,
-                policy.q_model,
-                aug_nxt_obs,
-                explore=False,
-                is_training=True)
-            q_tp1_best_using_online_net = torch.argmax(q_tp1_using_online_net, 1)
-            q_tp1_best_one_hot_selection = F.one_hot(q_tp1_best_using_online_net,
-                                                    policy.action_space.n)
-            q_tp1_best = torch.sum(q_tp1 * q_tp1_best_one_hot_selection, 1)
-            q_dist_tp1_best = torch.sum(
-                q_dist_tp1 * torch.unsqueeze(q_tp1_best_one_hot_selection, -1), 1
-            )
-        else:
-            q_tp1_best_one_hot_selection = F.one_hot(
-                torch.argmax(q_tp1, 1), policy.action_space.n)
-            q_tp1_best = torch.sum(q_tp1 * q_tp1_best_one_hot_selection, 1)
-            q_dist_tp1_best = torch.sum(
-                q_dist_tp1 * torch.unsqueeze(q_tp1_best_one_hot_selection, -1), 1
-            )
-
-        # accumulate target Q with augmented next obs 
-        if q_tp1_best_avg is None:
-            q_tp1_best_avg = q_tp1_best
-            q_dist_tp1_best_avg = q_dist_tp1_best
-        else:
-            q_tp1_best_avg += q_tp1_best
-            q_dist_tp1_best_avg += q_dist_tp1_best
-
-    q_tp1_best_avg /= aug_num
-    q_dist_tp1_best_avg /= aug_num
-
-    # q network evaluation
-    aug_loss = 0
-    orig_cur_obs = train_batch[SampleBatch.CUR_OBS].clone()
-    for _ in range(aug_num):
-        # augment obs 
-        aug_cur_obs = model.trans(
-            orig_cur_obs.permute(0,3,1,2).float()
-        ).permute(0,2,3,1)
-
-        q_t, q_logits_t, q_dist_t = compute_rainbow_q_values(
-            policy,
-            policy.q_model,
-            aug_cur_obs,
-            explore=False,
-            is_training=True)
-
-        # q scores for actions which we know were selected in the given state.
-        one_hot_selection = F.one_hot(train_batch[SampleBatch.ACTIONS],
-                                    policy.action_space.n)
-        q_t_selected = torch.sum(q_t * one_hot_selection, 1)
-        q_logits_t_selected = torch.sum(
-            q_logits_t * torch.unsqueeze(one_hot_selection, -1), 1
+    # critic optimizer 
+    policy.critic_optim = torch.optim.Adam(
+            params=policy.q_model.parameters(),
+            # lr=config["optimization"]["critic_learning_rate"],
+            lr=policy.cur_lr,
+            # eps=1e-7,  # to match tf.keras.optimizers.Adam's epsilon default
+            eps=config["adam_epsilon"],
+            betas=(config["optimization"]["critic_beta"], 0.999)
         )
 
-        # Bellman error 
-        policy.q_loss = RainbowQLoss(
-            q_t_selected, 
-            q_logits_t_selected,
-            q_tp1_best_avg, 
-            q_dist_tp1_best_avg,
-            train_batch[PRIO_WEIGHTS],
-            train_batch[SampleBatch.REWARDS],
-            train_batch[SampleBatch.DONES].float(),
-            config["gamma"], 
-            config["n_step"],
-            config["num_atoms"], 
-            config["v_min"],
-            config["v_max"]
-        )
-        # accumulate loss with augmented obs 
-        aug_loss += policy.q_loss.loss
-    return aug_loss / aug_num 
+    # cpc / encoder optimizer 
+    policy.encoder_optim = torch.optim.Adam(
+        params=policy.q_model.encoder.parameters(),
+        lr=config["optimization"]["encoder_learning_rate"],
+        eps=1e-7,  # to match tf.keras.optimizers.Adam's epsilon default
+    )
+    policy.cpc_optim = torch.optim.Adam(
+        params=policy.curl.parameters(),
+        lr=config["optimization"]["encoder_learning_rate"],
+        eps=1e-7,  # to match tf.keras.optimizers.Adam's epsilon default
+    )
 
-
-
-def adam_optimizer(policy, config):
-    return torch.optim.Adam(
-        policy.q_func_vars, lr=policy.cur_lr, eps=config["adam_epsilon"])
+    return tuple([policy.critic_optim] + [policy.encoder_optim, policy.cpc_optim])
 
 
 def build_q_stats(policy, batch):
@@ -465,14 +415,178 @@ class ComputeTDErrorMixin:
             input_dict[SampleBatch.DONES] = done_mask
             input_dict[PRIO_WEIGHTS] = importance_weights
 
+            # NOTE: use eval mode cropping (center), 64 -> cropped_image_size (54)
+            cur_obs = input_dict[SampleBatch.CUR_OBS].permute(0,3,1,2).float()
+            nxt_obs = input_dict[SampleBatch.NEXT_OBS].permute(0,3,1,2).float()
+
+            input_dict[SampleBatch.CUR_OBS] = self.q_model.center_crop(cur_obs)
+            input_dict[SampleBatch.NEXT_OBS] = self.q_model.center_crop(nxt_obs)
+
             # Do forward pass on loss to update td error attribute
             # build_q_losses(self, self.model, None, input_dict)
-            # NOTE: customs but not sure if works 
-            self._loss(self, self.model, None, input_dict)
+            build_rainbow_q_losses(self, self.q_model, None, input_dict)
 
             return self.q_loss.td_error
 
         self.compute_td_error = compute_td_error
+
+
+class TargetNetworkMixin:
+    def __init__(self, obs_space, action_space, config):
+        # def do_update():
+        #     # Update_target_fn will be called periodically to copy Q network to
+        #     # target Q network.
+        #     assert len(self.q_func_vars) == len(self.target_q_func_vars), \
+        #         (self.q_func_vars, self.target_q_func_vars)
+        #     self.target_q_model.load_state_dict(self.q_model.state_dict())
+
+        # self.update_target = do_update
+
+        self.update_target(tau=1.0)
+
+    def update_target(self, tau=None):
+        """ different update rates for different model components
+         + soft updates
+        """
+        # hard update for initialization
+        if tau is not None:
+            critic_tau = encoder_tau = tau 
+        else:
+            critic_tau = self.config["critic_tau"]
+            encoder_tau = self.config["encoder_tau"]
+        # update Q targets
+        update_params(self.q_func_vars, self.target_q_func_vars, critic_tau)
+        # update encoder 
+        # update_params(
+        #     self.q_model.encoder.parameters(), 
+        #     self.target_model.encoder.parameters(), 
+        #     encoder_tau
+        # )
+        update_model_params(
+            self.q_model.encoder, 
+            self.target_q_model.encoder, 
+            encoder_tau
+        )
+
+
+
+# NOTE: customs 
+class CurlMixin:
+    """ methods (overrides) for Contrastive Unsupervised Representations for RL
+    """
+    def __init__(self):
+        self.cross_entropy_loss = nn.CrossEntropyLoss()
+        self.POS_OBS = "pos"
+        self.cpc_update_freq = self.config.get("cpc_update_freq", 1)
+    
+    def cpc_loss(self, train_batch):
+        """ meat for CURL 
+        """
+        # collect positive and negative samples 
+        obs_anchor = train_batch[SampleBatch.CUR_OBS]
+        obs_pos = train_batch[self.POS_OBS]
+
+        z_a = self.curl.encode(obs_anchor, permute=False)
+        z_pos = self.curl.encode(obs_pos, ema=True, permute=False)
+        
+        logits = self.curl.compute_logits(z_a, z_pos)
+        labels = torch.arange(logits.shape[0]).long().to(logits.device)
+        loss = self.cross_entropy_loss(logits, labels)
+        
+        # Save for stats function.
+        policy.cpc_loss = loss 
+        return loss 
+
+    @override(TorchPolicy)
+    def learn_on_batch(self, postprocessed_batch):
+        """ CURL-style updates 
+        """
+        # convert to UsageTrackingDict from MultiagentBatch
+        train_batch = self._lazy_tensor_dict(postprocessed_batch)
+
+        # crop inputs 64 -> cropped_image_size (54)
+        cur_obs = train_batch[SampleBatch.CUR_OBS].permute(0,3,1,2).float()
+        nxt_obs = train_batch[SampleBatch.NEXT_OBS].permute(0,3,1,2).float()
+
+        train_batch[SampleBatch.CUR_OBS] = self.q_model.random_crop(cur_obs)
+        train_batch[SampleBatch.NEXT_OBS] = self.q_model.random_crop(nxt_obs)
+        # constrastive positives 
+        train_batch[self.POS_OBS] = self.q_model.random_crop(cur_obs)
+
+        # collect backprop stats
+        grad_info = {"allreduce_latency": 0.0}
+        step = self.global_timestep                                                                  
+
+        # NOTE: loop through each loss and optimizer
+        # optimize critics
+        critic_loss = build_rainbow_q_losses(self, self.q_model, _, train_batch):
+
+        self.critic_optim.zero_grad()
+        critic_loss.backward()
+
+        grad_info.update(self.extra_grad_process(self.critic_optim, critic_loss))
+        latency = self.average_grad(self.critic_optim)
+        grad_info["allreduce_latency"] += latency
+
+        self.critic_optim.step()
+
+        # optimize encoder and CURL 
+        if step % self.cpc_update_freq == 0:
+            cpc_loss = self.cpc_loss(train_batch, grad_info)
+            
+            self.encoder_optim.zero_grad()
+            self.cpc_optim.zero_grad()
+            cpc_loss.backward()
+
+            grad_info.update(self.extra_grad_process(self.encoder_optim, cpc_loss))
+            latency = self.average_grad(self.encoder_optim)
+            grad_info["allreduce_latency"] += latency
+
+            grad_info.update(self.extra_grad_process(self.cpc_optim, cpc_loss))
+            latency = self.average_grad(self.cpc_optim)
+            grad_info["allreduce_latency"] += latency
+
+            self.encoder_optim.step()
+            self.cpc_optim.step()
+
+        # collect other grad info
+        grad_info["allreduce_latency"] /= len(self._optimizers)
+        grad_info.update(self.extra_grad_info(train_batch))
+        return {LEARNER_STATS_KEY: grad_info}
+
+    def average_grad(self, opt):
+        """ for distributed setting, average gradients withh allreduce 
+        Input:
+            - opt: optimizer 
+        Output:
+            - latency
+        """
+        if self.distributed_world_size:
+            grads = []
+            for param_group in opt.param_groups:
+                for p in param_group["params"]:
+                    if p.grad is not None:
+                        grads.append(p.grad)
+
+            start = time.time()
+            if torch.cuda.is_available():
+                # Sadly, allreduce_coalesced does not work with CUDA yet.
+                for g in grads:
+                    torch.distributed.all_reduce(
+                        g, op=torch.distributed.ReduceOp.SUM)
+            else:
+                torch.distributed.all_reduce_coalesced(
+                    grads, op=torch.distributed.ReduceOp.SUM)
+
+            for param_group in opt.param_groups:
+                for p in param_group["params"]:
+                    if p.grad is not None:
+                        p.grad /= self.distributed_world_size
+
+            latency = time.time() - start
+            return latency
+        else:
+            return 0
 
 
 def setup_early_mixins(policy, obs_space, action_space, config):
@@ -485,6 +599,7 @@ def after_init(policy, obs_space, action_space, config):
     # Move target net to device (this is done autoatically for the
     # policy.model, but not for any other models the policy has).
     policy.target_q_model = policy.target_q_model.to(policy.device)
+    CurlMixin.__init__(policy)
 
 
 def grad_process_and_td_error_fn(policy, optimizer, loss):
@@ -503,42 +618,25 @@ def extra_action_out_fn(policy, input_dict, state_batches, model, action_dist):
 #####################################   Policy   #####################################################
 #######################################################################################################
 
-NoAugRainbowTorchPolicy = build_torch_policy(
-    name="NoAugRainbowTorchPolicy",
-    loss_fn=build_rainbow_q_losses,
+CurlRainbowTorchPolicy = build_torch_policy(
+    name="CurlRainbowTorchPolicy",
+    # loss updates shifted to policy.learn_on_batch
+    loss_fn=None,
     make_model_and_action_dist=build_q_model_and_distribution,
     action_distribution_fn=get_distribution_inputs_and_class,
+    optimizer_fn=optimizer_fn,
     # shared 
     get_default_config=lambda: ray.rllib.agents.dqn.dqn.DEFAULT_CONFIG,
     stats_fn=build_q_stats,
     postprocess_fn=postprocess_nstep_and_prio,
-    optimizer_fn=adam_optimizer,
     extra_grad_process_fn=grad_process_and_td_error_fn,
     extra_action_out_fn=extra_action_out_fn,
     before_init=setup_early_mixins,
+    # added curl mixin 
     after_init=after_init,
     mixins=[
         TargetNetworkMixin,
         ComputeTDErrorMixin,
         LearningRateSchedule,
-    ])
-
-DrqRainbowTorchPolicy = build_torch_policy(
-    name="DrqRainbowTorchPolicy",
-    loss_fn=build_drq_rainbow_q_losses,
-    make_model_and_action_dist=build_q_model_and_distribution,
-    action_distribution_fn=get_distribution_inputs_and_class,
-    # shared 
-    get_default_config=lambda: ray.rllib.agents.dqn.dqn.DEFAULT_CONFIG,
-    stats_fn=build_q_stats,
-    postprocess_fn=postprocess_nstep_and_prio,
-    optimizer_fn=adam_optimizer,
-    extra_grad_process_fn=grad_process_and_td_error_fn,
-    extra_action_out_fn=extra_action_out_fn,
-    before_init=setup_early_mixins,
-    after_init=after_init,
-    mixins=[
-        TargetNetworkMixin,
-        ComputeTDErrorMixin,
-        LearningRateSchedule,
+        CurlMixin
     ])

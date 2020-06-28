@@ -19,7 +19,7 @@ from ray.rllib.utils.annotations import override
 from ray.rllib.policy.policy import Policy, LEARNER_STATS_KEY
 from ray.rllib.policy.torch_policy import TorchPolicy
 from algorithms.curl.sac.sac_model import CurlSACTorchModel, CURL
-import kornia 
+from utils.utils import update_model_params
 
 torch, nn = try_import_torch()
 F = nn.functional
@@ -139,7 +139,7 @@ def curl_action_distribution_fn(policy,
     )
     # get action distrib
     model_out, _ = model.get_embeddings({
-        "obs": obs_batch,
+        "obs": cropped_obs_batch,
         "is_training": is_training,
     }, [], None, permute=False)
     distribution_inputs = model.get_policy_output(model_out)
@@ -259,7 +259,7 @@ class ComputeTDErrorMixin:
             # Self.td_error is set within actor_critic_loss call.
             return self.td_error
 
-        self.compute_td_error = compute_td_error
+        self.compute_td_error = comspute_td_error
 
 
 class TargetNetworkMixin:
@@ -294,29 +294,11 @@ class TargetNetworkMixin:
             critic_tau = self.config["critic_tau"]
             encoder_tau = self.config["encoder_tau"]
         # update Q targets
-        self.soft_update_params(self.model.q_net, self.target_model.q_net, critic_tau)
+        update_model_params(self.model.q_net, self.target_model.q_net, critic_tau)
         if self.config["twin_q"]:
-            self.soft_update_params(self.model.twin_q_net, self.target_model.twin_q_net, critic_tau)
+            update_model_params(self.model.twin_q_net, self.target_model.twin_q_net, critic_tau)
         # update encoder 
-        self.soft_update_params(self.model.encoder, self.target_model.encoder, encoder_tau)
-
-    def soft_update_params(self, model, target_model, tau):
-        """ general hard/soft update func
-        """
-        # # reference: https://github.com/MishaLaskin/curl/blob/019a229eb049b9400e97f142f32dd47b4567ba8a/utils.py#L123
-        # for param, target_param in zip(model.parameters(), target_model.parameters()):
-        #     target_param.data.copy_(
-        #         tau * param.data + (1 - tau) * target_param.data
-        #     )
-        model_state_dict = model.state_dict()
-        # If tau == 1.0: Full sync from Q-model to target Q-model.
-        if tau != 1.0:
-            target_state_dict = target_model.state_dict()
-            model_state_dict = {
-                k: tau * model_state_dict[k] + (1 - tau) * v
-                for k, v in target_state_dict.items()
-            }
-        target_model.load_state_dict(model_state_dict)
+        update_model_params(self.model.encoder, self.target_model.encoder, encoder_tau)
 
 
 
@@ -627,7 +609,8 @@ def setup_late_mixins(policy, obs_space, action_space, config):
 
 CurlSACTorchPolicy = build_torch_policy(
     name="CurlSACTorchPolicy",
-    loss_fn=actor_critic_loss,
+    # loss updates shifted to policy.learn_on_batch
+    loss_fn=None,
     get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
     stats_fn=stats,
     # called in a torch.no_grad scope, calls loss func again to update td error 

@@ -10,7 +10,7 @@ F = None
 if nn:
     F = nn.functional
 
-from kornia.augmentation import RandomCrop
+from kornia.augmentation import CenterCrop, RandomCrop
 from models import make_encoder
 
 
@@ -116,7 +116,7 @@ class NoisyLinear(nn.Linear):
 #####################################   Main models   #####################################################
 #######################################################################################################
 
-class DrqRainbowTorchModel(TorchModelV2, nn.Module):
+class CurlRainbowTorchModel(TorchModelV2, nn.Module):
     """ Extension of standard TorchModelV2 to provide dueling-Q functionality.
     reference: https://github.com/ray-project/ray/blob/master/rllib/agents/dqn/distributional_q_tf_model.py
     """
@@ -144,10 +144,11 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
             num_atoms=1,
             v_min=-10.0,
             v_max=10.0,
-            augmentation=False,
-            aug_num=2,
-            max_shift=4,
-            encoder_type="impala",
+            embed_dim=50,
+            encoder_type="pixel",
+            num_layers=4,
+            num_filters=32,
+            cropped_image_size=54,
             **kwargs):
         """Initialize variables of this model.
         Extra model kwargs:
@@ -259,16 +260,12 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
         z = v_min + z * (v_max - v_min) / float(num_atoms - 1)
         self.z = z  # return distribution support 
 
-        # augmentations 
-        self.augmentation = augmentation
-        self.aug_num = aug_num
-        if augmentation:
-            obs_shape = obs_space.shape[-2]
-            self.trans = nn.Sequential(
-                nn.ReplicationPad2d(max_shift),
-                RandomCrop((obs_shape, obs_shape))
-            )
-    
+        # NOTE: input cropping 
+        self.cropped_image_size = cropped_image_size
+        self.center_crop = CenterCrop(cropped_image_size)
+        self.random_crop = RandomCrop((cropped_image_size, cropped_image_size))
+
+
     def get_advantages_or_q_values(self, model_out):
         """ Returns distributional values for Q(s, a) given a state embedding.
         Override this in your custom model to customize the Q output head.
@@ -330,13 +327,21 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
             self.fc_actor.remove_noise()
             self.fc_critic.remove_noise()
 
+    def q_variables(self):
+        """Return the list of variables for Q / twin Q nets."""
+        params = list(self.advantage_module.parameters())
+        if self.dueling:
+            params += list(self.value_module.parameters())
+        return params
+
+
 
 #######################################################################################################
 #####################################   Misc   #####################################################
 #######################################################################################################
 
 # Register model in ModelCatalog
-ModelCatalog.register_custom_model("drq_rainbow", DrqRainbowTorchModel)
+ModelCatalog.register_custom_model("curl_rainbow", CurlRainbowTorchModel)
 
 
 
