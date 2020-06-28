@@ -6,7 +6,7 @@ from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 
 # custom imports  
 from ray.rllib.agents.dqn.dqn import GenericOffPolicyTrainer
-from algorithms.drq.rainbow.rainbow_policy import NoAugRainbowTorchPolicy, DrqRainbowTorchPolicy
+from algorithms.drq.rainbow.rainbow_policy import CurlRainbowTorchPolicy
 
 
 logger = logging.getLogger(__name__)
@@ -236,11 +236,8 @@ def validate_config(config):
                              "replay_sequence_length > 1.")
 
 
-def get_rainbow_policy_class(config):    
-    if config["augmentation"] == True:
-        return DrqRainbowTorchPolicy
-    else:
-        return NoAugRainbowTorchPolicy
+def get_rainbow_policy_class(config):        
+    return CurlRainbowTorchPolicy
 
 
 
@@ -301,11 +298,11 @@ rainbow_config = DEFAULT_CONFIG.copy()
 rainbow_config.update(new_config)
 
 
-DrqRainbowTrainer = GenericOffPolicyTrainer.with_updates(
-    name="DrqRainbow",
+CurlRainbowTrainer = GenericOffPolicyTrainer.with_updates(
+    name="CurlRainbow",
     default_config=rainbow_config,
     validate_config=validate_config,
-    default_policy=DrqRainbowTorchPolicy,
+    default_policy=CurlRainbowTorchPolicy,
     get_policy_class=get_rainbow_policy_class,
 )
 

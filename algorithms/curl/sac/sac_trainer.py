@@ -195,7 +195,7 @@ new_config = {
         "alpha_beta": 0.5,
         "encoder_learning_rate": 1e-3, 
     },
-
+ 
     "actor_update_freq": 2,
     "cpc_update_freq": 1,
     "target_network_update_freq": 2,
@@ -223,7 +223,7 @@ CurlSACTrainer = GenericOffPolicyTrainer.with_updates(
     default_config=curl_config,
     validate_config=validate_config,
     default_policy=CurlSACTorchPolicy,
-    get_policy_class=lambda x: DrqSACTorchPolicy,
+    get_policy_class=lambda x: CurlSACTorchPolicy,
 )
 
 

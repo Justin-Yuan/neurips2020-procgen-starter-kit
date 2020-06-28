@@ -2,6 +2,7 @@ import os
 import sys 
 import math 
 import logging 
+import numpy as np 
 
 from ray.tune.logger import Logger, VALID_SUMMARY_TYPES
 from ray.tune.utils import flatten_dict
@@ -28,6 +29,54 @@ def mkdirs(*paths):
 ##########################################################################################
 ####################################     Model Utils   ##################################
 #########################################################################################
+
+
+class NoisyLinear(nn.Linear):
+    """ Noisy linear layer with independent Gaussian noise (for Rainbow)
+    reference: https://github.com/Kaixhin/NoisyNet-A3C/blob/master/model.py#L10-L37
+    """
+    def __init__(self, in_features, out_features, sigma_init=0.017, bias=True):
+        super(NoisyLinear, self).__init__(in_features, out_features, bias=True)  # TODO: Adapt for no bias
+        # µ^w and µ^b reuse self.weight and self.bias
+        self.sigma_init = sigma_init
+        self.sigma_weight = nn.Parameter(torch.Tensor(out_features, in_features))  # σ^w
+        self.sigma_bias = nn.Parameter(torch.Tensor(out_features))  # σ^b
+        self.register_buffer('epsilon_weight', torch.zeros(out_features, in_features))
+        self.register_buffer('epsilon_bias', torch.zeros(out_features))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        if hasattr(self, 'sigma_weight'):  # Only init after all params added (otherwise super().__init__() fails)
+            nn.init.uniform(self.weight, -math.sqrt(3 / self.in_features), math.sqrt(3 / self.in_features))
+            nn.init.uniform(self.bias, -math.sqrt(3 / self.in_features), math.sqrt(3 / self.in_features))
+            nn.init.constant(self.sigma_weight, self.sigma_init)
+            nn.init.constant(self.sigma_bias, self.sigma_init)
+
+    def forward(self, input):
+        # set noise first, remember to set model flag train() or eval()
+        if self.training:
+            self.sample_noise()
+        else:
+            self.remove_noise()
+        return F.linear(input, self.weight + self.sigma_weight * Variable(self.epsilon_weight), self.bias + self.sigma_bias * Variable(self.epsilon_bias))
+
+    def sample_noise(self):
+        self.epsilon_weight = torch.randn(self.out_features, self.in_features)
+        self.epsilon_bias = torch.randn(self.out_features)
+
+    def remove_noise(self):
+        self.epsilon_weight = torch.zeros(self.out_features, self.in_features)
+        self.epsilon_bias = torch.zeros(self.out_features)
+
+
+
+
+
+
+##########################################################################################
+####################################     Torch func Utils   ##################################
+#########################################################################################
+
 
 def get_conv_output_shape(in_shape, kernel, stride=1, padding=0, dilation=1, out_channels=32):
     """ infer output shape after 1 layer of conv 
