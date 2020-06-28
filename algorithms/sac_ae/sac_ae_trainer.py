@@ -41,11 +41,6 @@ DEFAULT_CONFIG = with_common_config({
     # Ignored for discrete action spaces.
     "normalize_actions": True,
 
-    # === Customs ===
-    "augmentation": True,
-    "aug_num": 2,
-    "max_shift": 4,  
-
     # === Learning ===
     # Disable setting done=True at end of episode. This should be set to True
     # for infinite-horizon MDPs (e.g., many continuous control problems).
@@ -187,11 +182,20 @@ def validate_config(config):
 #####################################   Trainer  #####################################################
 #######################################################################################################
 
+new_config = {
+    # customs 
+    "augmentation": False,
+    "aug_num": 2,
+    "max_shift": 4, 
+}
+SAC_CONFIG = DEFAULT_CONFIG.copy()
+SAC_CONFIG.update(new_config)
+
 
 # SACAETrainer = GenericOffPolicyTrainer.with_updates(
 SACAETrainer = build_trainer(
     name="SACAE",
-    default_config=DEFAULT_CONFIG,
+    default_config=SAC_CONFIG,
     validate_config=validate_config,
     default_policy=SACAETorchPolicy,
     get_policy_class=get_policy_class,

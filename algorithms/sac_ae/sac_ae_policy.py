@@ -86,6 +86,7 @@ def build_sac_ae_model(policy, obs_space, action_space, config):
         twin_q=config["twin_q"],
         initial_alpha=config["initial_alpha"],
         target_entropy=config["target_entropy"],
+        # customs 
         augmentation=config["augmentation"],
         aug_num=config["aug_num"],
         max_shift=config["max_shift"]) 
@@ -104,6 +105,7 @@ def build_sac_ae_model(policy, obs_space, action_space, config):
         twin_q=config["twin_q"],
         initial_alpha=config["initial_alpha"],
         target_entropy=config["target_entropy"],
+        # customs 
         augmentation=config["augmentation"],
         aug_num=config["aug_num"],
         max_shift=config["max_shift"])
@@ -757,7 +759,8 @@ SACAETorchPolicy = build_torch_policy(
     make_model_and_action_dist=build_sac_ae_model_and_action_dist,
     action_distribution_fn=action_distribution_fn,
     # shared
-    get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
+    # get_default_config=lambda: ray.rllib.agents.sac.sac.DEFAULT_CONFIG,
+    get_default_config=lambda: algorithms.sac_ae.sac_ae_trainer.SAC_CONFIG,
     stats_fn=stats,
     postprocess_fn=postprocess_trajectory,
     extra_grad_process_fn=apply_grad_clipping,

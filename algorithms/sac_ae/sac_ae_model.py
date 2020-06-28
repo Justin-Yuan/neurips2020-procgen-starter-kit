@@ -57,6 +57,7 @@ class SACAETorchModel(TorchModelV2, nn.Module):
                  twin_q=False,
                  initial_alpha=1.0,
                  target_entropy=None,
+                 # customs 
                  embed_dim = 50,
                  augmentation=False,
                  aug_num=2,
