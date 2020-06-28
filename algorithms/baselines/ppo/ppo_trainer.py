@@ -80,12 +80,6 @@ DEFAULT_CONFIG = with_common_config({
     # Whether to fake GPUs (using CPUs).
     # Set this to True for debugging on non-GPU machines (set `num_gpus` > 0).
     "_fake_gpus": False,
-       # === Customs ===
-        ################################################
-        ################################################
-    "augmentation": True,
-    "aug_num": 2,
-    "max_shift": 4, 
 })
 # __sphinx_doc_end__
 # yapf: enable

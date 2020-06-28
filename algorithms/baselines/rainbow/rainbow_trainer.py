@@ -266,16 +266,6 @@ learning_starts: 1600
 """
 
 # here we use efficient rainbow with partial params from rllib rainbow
-rainbow_config = DEFAULT_CONFIG.copy()
-rainbow_config["num_atoms"] = 51
-rainbow_config["noisy"] = True
-rainbow_config["double_q"] = True
-rainbow_config["dueling"] = True
-rainbow_config["n_step"] = 20
-rainbow_config["learning_starts"] = 1600
-
-
-# here we use efficient rainbow with partial params from rllib rainbow
 new_config = {
 
     "num_atoms": 51,

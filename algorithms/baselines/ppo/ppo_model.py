@@ -23,7 +23,7 @@ class BaselinePPOTorchModel(TorchModelV2, nn.Module):
                 num_outputs,
                 model_config,
                 name,
-                #  customs 
+                # customs 
                 embed_dim = 256,
                 encoder_type="impala",
                 **kwargs):

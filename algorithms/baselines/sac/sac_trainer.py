@@ -41,11 +41,6 @@ DEFAULT_CONFIG = with_common_config({
     # Ignored for discrete action spaces.
     "normalize_actions": True,
 
-    # === Customs ===
-    "augmentation": True,
-    "aug_num": 2,
-    "max_shift": 4,  
-
     # === Learning ===
     # Disable setting done=True at end of episode. This should be set to True
     # for infinite-horizon MDPs (e.g., many continuous control problems).
