@@ -6,8 +6,7 @@ from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 
 # custom imports  
 from ray.rllib.agents.dqn.dqn import GenericOffPolicyTrainer
-from algorithms.drq.rainbow.rainbow_policy import NoAugRainbowTorchPolicy, DrqRainbowTorchPolicy
-
+from algorithms.baselines.dqn.dqn_policy import BaselineDQNTorchPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -236,83 +235,31 @@ def validate_config(config):
                              "replay_sequence_length > 1.")
 
 
-def get_rainbow_policy_class(config):    
-    if config["augmentation"] == True:
-        return DrqRainbowTorchPolicy
-    else:
-        return NoAugRainbowTorchPolicy
-
+def get_dqn_policy_class(config):
+    return BaselineDQNTorchPolicy
 
 
 #######################################################################################################
 #####################################   Trainers   #####################################################
 #######################################################################################################
 
-"""
-# original rainbow (https://arxiv.org/pdf/1710.02298.pdf)
-num_atoms: 51   #(min max +-10)
-noisy, double_q, dueling: True
-n_steps: 3
-learning_starts: 1000
-
-# ray rllib rainbow (https://github.com/ray-project/ray/blob/master/rllib/agents/dqn/tests/test_dqn.py)
-num_atoms: 10 
-noisy, double_q, dueling: True
-n_steps: 5
-learning_starts: 1000
-
-# efficient rainbow (https://arxiv.org/pdf/1906.05243.pdf)
-num_atoms: 51
-noisy, double_q, dueling: True
-n_step: 20
-learning_starts: 1600
-"""
-
-# here we use efficient rainbow with partial params from rllib rainbow
 new_config = {
-
-    "num_atoms": 51,
-    "noisy": True,
-    "double_q": True,
-    "dueling": True,
-    "n_step": 20,
-    "learning_starts": 1600,
-    
-    # "critic_learning_rate": 1e-3,
-    "lr": 1e-3,
-    "critic_beta": 0.9,
-    "encoder_learning_rate": 1e-3, 
-    # "adam_epsilon": 1e-7,
-
-    "cpc_update_freq": 1,
-    "target_network_update_freq": 2,
-
-    "critic_tau": 0.01,
-    "encoder_tau": 0.05,
-
-    "train_batch_size": 32,
-    "gamma": 0.99,
-
-    # customs 
-    "embed_dim": 128,
+    # customs
+    "embed_dim": 256,
     "encoder_type": "impala",
-
-    "augmentation": True,
-    "aug_num": 2,
-    "max_shift": 4,
 }
-RAINBOW_CONFIG = DEFAULT_CONFIG.copy()
-RAINBOW_CONFIG.update(new_config)
+DQN_CONFIG = DEFAULT_CONFIG.copy()
+DQN_CONFIG.update(new_config)
 
 
-
-DrqRainbowTrainer = GenericOffPolicyTrainer.with_updates(
-    name="DrqRainbow",
-    default_config=RAINBOW_CONFIG,
+BaselineDQNTrainer = GenericOffPolicyTrainer.with_updates(
+    name="BaselineDQN",
+    default_config=DQN_CONFIG,
     validate_config=validate_config,
-    default_policy=DrqRainbowTorchPolicy,
-    get_policy_class=get_rainbow_policy_class,
+    default_policy=BaselineDQNTorchPolicy,
+    get_policy_class=get_dqn_policy_class,
 )
+
 
 
 

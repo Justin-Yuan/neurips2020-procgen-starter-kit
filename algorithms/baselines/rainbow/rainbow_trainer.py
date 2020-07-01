@@ -6,7 +6,7 @@ from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 
 # custom imports  
 from ray.rllib.agents.dqn.dqn import GenericOffPolicyTrainer
-from algorithms.drq.rainbow.rainbow_policy import NoAugRainbowTorchPolicy, DrqRainbowTorchPolicy
+from algorithms.baselines.rainbow.rainbow_policy import BaselineRainbowTorchPolicy
 
 
 logger = logging.getLogger(__name__)
@@ -237,10 +237,7 @@ def validate_config(config):
 
 
 def get_rainbow_policy_class(config):    
-    if config["augmentation"] == True:
-        return DrqRainbowTorchPolicy
-    else:
-        return NoAugRainbowTorchPolicy
+    return BaselineRainbowTorchPolicy
 
 
 
@@ -296,21 +293,16 @@ new_config = {
     # customs 
     "embed_dim": 128,
     "encoder_type": "impala",
-
-    "augmentation": True,
-    "aug_num": 2,
-    "max_shift": 4,
 }
 RAINBOW_CONFIG = DEFAULT_CONFIG.copy()
 RAINBOW_CONFIG.update(new_config)
 
 
-
-DrqRainbowTrainer = GenericOffPolicyTrainer.with_updates(
-    name="DrqRainbow",
+BaselineRainbowTrainer = GenericOffPolicyTrainer.with_updates(
+    name="BaselineRainbow",
     default_config=RAINBOW_CONFIG,
     validate_config=validate_config,
-    default_policy=DrqRainbowTorchPolicy,
+    default_policy=BaselineRainbowTorchPolicy,
     get_policy_class=get_rainbow_policy_class,
 )
 

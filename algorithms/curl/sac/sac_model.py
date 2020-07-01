@@ -4,13 +4,13 @@ import numpy as np
 from ray.rllib.models import ModelCatalog
 from ray.rllib.models.torch.misc import SlimFC
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
-from ray.rllib.utils.framework import get_activation_fn, try_import_torch
-torch, nn = try_import_torch()
-from models.impala_cnn_torch import ResidualBlock, ConvSequence
 from ray.rllib.utils.annotations import override
-from kornia.augmentation import CenterCrop, RandomCrop
+from ray.rllib.utils.framework import get_activation_fn, try_import_torch
+
+torch, nn = try_import_torch()
 
 from models import make_encoder
+from kornia.augmentation import CenterCrop, RandomCrop
 
 
 #######################################################################################################
@@ -206,15 +206,8 @@ class CurlSACTorchModel(TorchModelV2, nn.Module):
         """ return embedding value
         """
         x, state = self.get_embeddings(input_dict, state, seq_lens)
-        logits = self.get_policy_output(x)
-        value = self.get_q_values(x)
-        self._value = value.squeeze(1)
-        return logits, state
-
-    @override(TorchModelV2)
-    def value_function(self):
-        assert self._value is not None, "must call forward() first"
-        return self._value
+        # logits = self.get_policy_output(x)
+        return x, state
 
     def get_embeddings(self, input_dict, state, seq_lens, permute=True):
         """ encode observations 

@@ -7,10 +7,10 @@ from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.utils.framework import get_activation_fn, try_import_torch
 from models.impala_cnn_torch import ResidualBlock, ConvSequence
 from ray.rllib.utils.annotations import override
-import kornia
 
 torch, nn = try_import_torch()
 
+from kornia.augmentation import RandomCrop
 from models import make_encoder
 
 
@@ -152,7 +152,7 @@ class DrqSACTorchModel(TorchModelV2, nn.Module):
             obs_shape = obs_space.shape[-2]
             self.trans = nn.Sequential(
                 nn.ReplicationPad2d(max_shift),
-                kornia.augmentation.RandomCrop((obs_shape, obs_shape))
+                RandomCrop((obs_shape, obs_shape))
             )
     
     @override(TorchModelV2)
@@ -160,12 +160,8 @@ class DrqSACTorchModel(TorchModelV2, nn.Module):
         """ return embedding value
         """
         x, state = self.get_embeddings(input_dict, state, seq_lens)
-        logits = self.get_policy_output(x)
-        # only need value during training 
-        if input_dict["is_training"]:
-            value = self.get_q_values(x)
-            self._value = value.squeeze(1)
-        return logits, state
+        # logits = self.get_policy_output(x)
+        return x, state
 
     @override(TorchModelV2)
     def value_function(self):

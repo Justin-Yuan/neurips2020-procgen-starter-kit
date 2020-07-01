@@ -255,9 +255,22 @@ def get_dqn_policy_class(config):
 #####################################   Trainers   #####################################################
 #######################################################################################################
 
+new_config = {
+    # customs
+    "embed_dim": 256,
+    "encoder_type": "impala",
+    
+    "augmentation": True,
+    "aug_num": 2,
+    "max_shift": 4, 
+}
+DQN_CONFIG = DEFAULT_CONFIG.copy()
+DQN_CONFIG.update(new_config)
+
+
 DrqDQNTrainer = GenericOffPolicyTrainer.with_updates(
     name="DrqDQN",
-    default_config=DEFAULT_CONFIG,
+    default_config=DQN_CONFIG,
     validate_config=validate_config,
     default_policy=DrqDQNTorchPolicy,
     get_policy_class=get_dqn_policy_class,

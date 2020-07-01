@@ -1,38 +1,23 @@
-# gym and np
 from gym.spaces import Discrete
 import numpy as np
 
-# ray
 from ray.rllib.models import ModelCatalog
 from ray.rllib.models.torch.misc import SlimFC
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
-from ray.rllib.utils.framework import get_activation_fn, try_import_torch
-torch, nn = try_import_torch()
-from models.impala_cnn_torch import ResidualBlock, ConvSequence
 from ray.rllib.utils.annotations import override
-# aug
-import kornia
-# ae
-from models import make_encoder, make_decoder
+from ray.rllib.utils.framework import get_activation_fn, try_import_torch
+
+torch, nn = try_import_torch()
+
+from models import make_encoder
 
 
-def weight_init(m):
-    """Custom weight init for Conv2D and Linear layers."""
-    if isinstance(m, nn.Linear):
-        nn.init.orthogonal_(m.weight.data)
-        m.bias.data.fill_(0.0)
-    elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
-        # delta-orthogonal init from https://arxiv.org/pdf/1806.05393.pdf
-        assert m.weight.size(2) == m.weight.size(3)
-        m.weight.data.fill_(0.0)
-        m.bias.data.fill_(0.0)
-        mid = m.weight.size(2) // 2
-        gain = nn.init.calculate_gain('relu')
-        nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
+#######################################################################################################
+#####################################   Helper stuff   #####################################################
+#######################################################################################################
 
 
-
-class SACAETorchModel(TorchModelV2, nn.Module):
+class BaselineSACTorchModel(TorchModelV2, nn.Module):
     """Extension of standard TorchModelV2 for SAC.
 
     Data flow:
@@ -45,29 +30,22 @@ class SACAETorchModel(TorchModelV2, nn.Module):
     implement forward() in a subclass."""
 
     def __init__(self,
-                 obs_space,
-                 action_space,
-                 num_outputs,
-                 model_config,
-                 name,
-                 actor_hidden_activation="relu",
-                 actor_hiddens=(256, 256),
-                 critic_hidden_activation="relu",
-                 critic_hiddens=(256, 256),
-                 twin_q=False,
-                 initial_alpha=1.0,
-                 target_entropy=None,
-                 # customs 
-                 embed_dim = 50,
-                 augmentation=False,
-                 aug_num=2,
-                 max_shift=4,
-                 encoder_feature_dim=50,
-                 num_layers=4,
-                 num_filters=32,
-                 decoder_type='pixel',
-                 encoder_type='pixel',
-                 **kwargs):
+                obs_space,
+                action_space,
+                num_outputs,
+                model_config,
+                name,
+                actor_hidden_activation="relu",
+                actor_hiddens=(256, 256),
+                critic_hidden_activation="relu",
+                critic_hiddens=(256, 256),
+                twin_q=False,
+                initial_alpha=1.0,
+                target_entropy=None,
+                #  customs 
+                embed_dim = 256,
+                encoder_type="impala",
+                **kwargs):
         """Initialize variables of this model.
 
         Extra model kwargs:
@@ -99,44 +77,16 @@ class SACAETorchModel(TorchModelV2, nn.Module):
     
         h, w, c = obs_space.shape
         shape = (c, h, w)
-        obs_shape = shape
-
         # obs embedding 
-        # conv_seqs = []
-        # for out_channels in [16, 32, 32]:
-        #     conv_seq = ConvSequence(shape, out_channels)
-        #     shape = conv_seq.get_output_shape()
-        #     conv_seqs.append(conv_seq)
-        # self.conv_seqs = nn.ModuleList(conv_seqs)
-        # self.hidden_fc = nn.Linear(in_features=shape[0] * shape[1] * shape[2], out_features=embed_dim)
-
-        # Build the policy network
-        # TODO: fix func input
-        self.actor_encoder = make_encoder(
-            encoder_type, obs_shape, encoder_feature_dim, num_layers, num_filters
-        )
-
-        self.critic_encoder = make_encoder(
-            encoder_type, obs_shape, encoder_feature_dim, num_layers, num_filters
-        )
-
-        # tie encoders between actor and critic
-        self.actor_encoder.copy_conv_weights_from(self.critic_encoder)
-
+        self.encoder = make_encoder(encoder_type, shape, out_features=embed_dim)
+  
+        # Build the policy network.
         self.action_model = nn.Sequential()
-        # img -> embedding
         ins = embed_dim
         act = get_activation_fn(
             actor_hidden_activation, framework="torch")
         init = nn.init.xavier_uniform_
-        outs = self.actor_encoder.feature_dim
-        # embedding to autoencoder embed
-        self.action_model.add_module(
-                "action_{}".format('e'), 
-                SlimFC(ins, outs, initializer=init, activation_fn=act)
-            )
-        ins = outs   
-        # add trunk model 
+
         for i, n in enumerate(actor_hiddens):
             self.action_model.add_module(
                 "action_{}".format(i), 
@@ -150,22 +100,12 @@ class SACAETorchModel(TorchModelV2, nn.Module):
 
         # Build the Q-net(s), including target Q-net(s).
         def build_q_net(name_):
-            
-
             act = get_activation_fn(
                 critic_hidden_activation, framework="torch")
             init = nn.init.xavier_uniform_
             # For discrete actions, only obs.
             q_net = nn.Sequential()
             ins = embed_dim
-            # embed to encoder embed
-            outs = self.critic_encoder.feature_dim
-            q_net.add_module(
-                    "{}_hidden_{}".format(name_, "e"),
-                    SlimFC(ins, outs, initializer=init, activation_fn=act)
-                )
-            ins = outs
-
             for i, n in enumerate(critic_hiddens):
                 q_net.add_module(
                     "{}_hidden_{}".format(name_, i),
@@ -200,62 +140,26 @@ class SACAETorchModel(TorchModelV2, nn.Module):
         self.target_entropy = torch.tensor(
             data=[target_entropy], dtype=torch.float32, requires_grad=False)
 
-        # device = 0
-        # make decoder
-        self.decoder = None
-        if decoder_type != 'identity':
-            # create decoder
-            self.decoder = make_decoder(
-                decoder_type, obs_shape, encoder_feature_dim, num_layers,
-                num_filters
-            )
-            self.decoder.apply(weight_init)
-
-
-        # NOTE: custom fields 
-        self.augmentation = augmentation
-        self.aug_num = aug_num
-        # NOTE: augmentation 
-        if augmentation:
-            obs_shape = obs_space.shape[-2]
-            self.trans = nn.Sequential(
-                nn.ReplicationPad2d(max_shift),
-                kornia.augmentation.RandomCrop((obs_shape, obs_shape))
-            )
     
     @override(TorchModelV2)
     def forward(self, input_dict, state, seq_lens):
         """ return embedding value
+        NOTE: only output embedded output to fit the "actor_critic_loss" func signature
+        from https://github.com/ray-project/ray/blob/master/rllib/agents/sac/sac_torch_policy.py
         """
-        detach_encoder = False
-        # x = self.get_embeddings(input_dict, state, seq_lens)
-        x = self.actor_encoder(input_dict["obs"].permute(0,3,1,2), detach=detach_encoder)
-        logits = self.get_policy_output(x)
-        # only need value during training 
-        if input_dict["is_training"]:
-            value = self.get_q_values(x)
-            self._value = value.squeeze(1)
-        return logits, state
-
-    @override(TorchModelV2)
-    def value_function(self):
-        assert self._value is not None, "must call forward() first"
-        return self._value
+        x, state = self.get_embeddings(input_dict, state, seq_lens)
+        # logits = self.get_policy_output(x)
+        return x, state
 
     def get_embeddings(self, input_dict, state, seq_lens, permute=True):
         """ encode observations 
         """
         x = input_dict["obs"].float()
-        x = x / 255.0  # scale to 0-1
+        # x = x / 255.0  # scale to 0-1
         if permute:
             x = x.permute(0, 3, 1, 2)  # NHWC => NCHW
-        for conv_seq in self.conv_seqs:
-            x = conv_seq(x)
-        x = torch.flatten(x, start_dim=1)
-        x = nn.functional.relu(x)
-        x = self.hidden_fc(x)
-        x = nn.functional.relu(x)
-        return x
+        x = self.encoder(x)
+        return x, state
 
     def get_q_values(self, model_out, actions=None):
         """Return the Q estimates for the most recent forward pass.
@@ -323,5 +227,8 @@ class SACAETorchModel(TorchModelV2, nn.Module):
         return list(self.q_net.parameters()) + \
             (list(self.twin_q_net.parameters()) if self.twin_q_net else [])
 
+
+
+
 # Register model in ModelCatalog
-ModelCatalog.register_custom_model("sac_ae", SACAETorchModel)
+ModelCatalog.register_custom_model("baseline_sac", BaselineSACTorchModel)

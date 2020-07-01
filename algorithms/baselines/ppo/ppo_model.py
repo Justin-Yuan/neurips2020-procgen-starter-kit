@@ -4,12 +4,11 @@ import numpy as np
 from ray.rllib.models import ModelCatalog
 from ray.rllib.models.torch.misc import SlimFC
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
-from ray.rllib.utils.framework import get_activation_fn, try_import_torch
-torch, nn = try_import_torch()
-from models.impala_cnn_torch import ResidualBlock, ConvSequence
 from ray.rllib.utils.annotations import override
+from ray.rllib.utils.framework import get_activation_fn, try_import_torch
 
-from kornia.augmentation import RandomCrop
+torch, nn = try_import_torch()
+
 from models import make_encoder
 
 
@@ -17,7 +16,7 @@ from models import make_encoder
 #####################################   Main models   #####################################################
 #######################################################################################################
 
-class DrqPPOTorchModel(TorchModelV2, nn.Module):
+class BaselinePPOTorchModel(TorchModelV2, nn.Module):
     def __init__(self,
                 obs_space,
                 action_space,
@@ -27,9 +26,6 @@ class DrqPPOTorchModel(TorchModelV2, nn.Module):
                 # customs 
                 embed_dim = 256,
                 encoder_type="impala",
-                augmentation=False,
-                aug_num=2,
-                max_shift=4,
                 **kwargs):
         TorchModelV2.__init__(self, obs_space, action_space,
                                             num_outputs, model_config, name)
@@ -49,15 +45,6 @@ class DrqPPOTorchModel(TorchModelV2, nn.Module):
         self.logits_fc = nn.Linear(in_features=embed_dim, out_features=num_outputs)
         self.value_fc = nn.Linear(in_features=embed_dim, out_features=1)
 
-        # customs 
-        self.augmentation = augmentation
-        self.aug_num = aug_num
-        if augmentation:
-            obs_shape = obs_space.shape[-2]
-            self.trans = nn.Sequential(
-                nn.ReplicationPad2d(max_shift),
-                RandomCrop((obs_shape, obs_shape))
-            )
         
     @override(TorchModelV2)
     def forward(self, input_dict, state, seq_lens):
@@ -78,4 +65,4 @@ class DrqPPOTorchModel(TorchModelV2, nn.Module):
 
 
 # Register model in ModelCatalog
-ModelCatalog.register_custom_model("drq_ppo", DrqPPOTorchModel)
+ModelCatalog.register_custom_model("baseline_ppo", BaselinePPOTorchModel)

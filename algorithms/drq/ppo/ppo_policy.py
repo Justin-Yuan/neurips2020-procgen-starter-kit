@@ -114,6 +114,9 @@ def build_ppo_model_and_action_dist(policy, obs_space, action_space, config):
         num_outputs=num_outputs,
         model_config=config["model"],
         name="ppo_model",
+        # customs 
+        embed_dim =config["embed_dim"],
+        encoder_type=config["encoder_type"],
         augmentation=config["augmentation"],
         aug_num=config["aug_num"],
         max_shift=config["max_shift"]
@@ -391,7 +394,8 @@ NoAugPPOTorchPolicy = build_torch_policy(
     postprocess_fn=postprocess_ppo_gae,
     make_model_and_action_dist=build_ppo_model_and_action_dist,
     # shared 
-    get_default_config=lambda: ray.rllib.agents.ppo.ppo.DEFAULT_CONFIG,
+    # get_default_config=lambda: ray.rllib.agents.ppo.ppo.DEFAULT_CONFIG,
+    get_default_config=lambda: algorithms.drq.ppo.ppo_trainer.PPO_CONFIG,
     stats_fn=kl_and_loss_stats,
     extra_action_out_fn=vf_preds_fetches,
     extra_grad_process_fn=apply_grad_clipping,
@@ -409,7 +413,8 @@ DrqPPOTorchPolicy = build_torch_policy(
     postprocess_fn=postprocess_drq_ppo_gae,
     make_model_and_action_dist=build_ppo_model_and_action_dist,
     # shared 
-    get_default_config=lambda: ray.rllib.agents.ppo.ppo.DEFAULT_CONFIG,
+    # get_default_config=lambda: ray.rllib.agents.ppo.ppo.DEFAULT_CONFIG,
+    get_default_config=lambda: algorithms.drq.ppo.ppo_trainer.PPO_CONFIG,
     stats_fn=kl_and_loss_stats,
     extra_action_out_fn=vf_preds_fetches,
     extra_grad_process_fn=apply_grad_clipping,

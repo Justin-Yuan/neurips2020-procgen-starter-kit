@@ -1,12 +1,14 @@
 from ray.rllib.agents.trainer import with_common_config
 from ray.rllib.agents.dqn.dqn import GenericOffPolicyTrainer
+from ray.rllib.agents.sac.sac_tf_policy import SACTFPolicy
 from ray.rllib.utils.deprecation import deprecation_warning, DEPRECATED_VALUE
 
-from algorithms.curl.sac.sac_policy import CurlSACTorchPolicy
+# custom imports
+from algorithms.baselines.sac.sac_policy import BaselineSACTorchPolicy
 
 
 #######################################################################################################
-#####################################   Config Template   #####################################################
+#####################################   Config Template  #####################################################
 #######################################################################################################
 
 OPTIMIZER_SHARED_CONFIGS = [
@@ -24,23 +26,20 @@ DEFAULT_CONFIG = with_common_config({
     # RLlib model options for the Q function(s).
     "Q_model": {
         "fcnet_activation": "relu",
-        "fcnet_hiddens": [256, 256],
+        "fcnet_hiddens": [256, 64],
         "hidden_activation": DEPRECATED_VALUE,
         "hidden_layer_sizes": DEPRECATED_VALUE,
     },
     # RLlib model options for the policy function.
     "policy_model": {
         "fcnet_activation": "relu",
-        "fcnet_hiddens": [256, 256],
+        "fcnet_hiddens": [256, 64],
         "hidden_activation": DEPRECATED_VALUE,
         "hidden_layer_sizes": DEPRECATED_VALUE,
     },
     # Unsquash actions to the upper and lower bounds of env's action space.
     # Ignored for discrete action spaces.
     "normalize_actions": True,
-
-    # === Customs ===
-
 
     # === Learning ===
     # Disable setting done=True at end of episode. This should be set to True
@@ -132,8 +131,12 @@ DEFAULT_CONFIG = with_common_config({
 
 
 #######################################################################################################
-#####################################   Helper funcs   #####################################################
+#####################################   Helper funcs  #####################################################
 #######################################################################################################
+
+def get_policy_class(config):
+    return BaselineSACTorchPolicy
+
 
 def validate_config(config):
     if config.get("grad_norm_clipping", DEPRECATED_VALUE) != DEPRECATED_VALUE:
@@ -141,7 +144,7 @@ def validate_config(config):
         config["grad_clip"] = config.pop("grad_norm_clipping")
 
     # Use same keys as for standard Trainer "model" config.
-    for model in ["Q_model", "policy_model"]: 
+    for model in ["Q_model", "policy_model"]:
         if config[model].get("hidden_activation", DEPRECATED_VALUE) != \
                 DEPRECATED_VALUE:
             deprecation_warning(
@@ -156,82 +159,23 @@ def validate_config(config):
                 error=True)
 
 
-def get_sac_policy_class(config):        
-    return CurlSACTorchPolicy
-
-
 #######################################################################################################
-#####################################   Trainer   #####################################################
+#####################################   Trainer  #####################################################
 #######################################################################################################
 
-
-# curl_config = DEFAULT_CONFIG.copy()
-# # optimizer params 
-# curl_config["optimization"] = {
-#     "actor_learning_rate": 1e-3,
-#     "critic_learning_rate": 1e-3,
-#     "entropy_learning_rate": 1e-3,
-#     "actor_beta": 0.9,
-#     "critic_beta": 0.9,
-#     "alpha_beta": 0.9,
-#     "encoder_learning_rate": 1e-3, 
-# }
-# # training uopdate freq 
-# curl_config["actor_update_freq"] = 2
-# curl_config["cpc_update_freq"] = 1
-# curl_config["target_network_update_freq"] = 2
-# # target update params 
-# curl_config["critic_tau"] = 0.01    # try 0.05 or 0.1
-# curl_config["encoder_tau"] = 0.05
-# # customs 
-# curl_config["cropped_image_size"] = 54
-# curl_config["embed_dim"] = 50
-
-
-# reference: https://github.com/MishaLaskin/curl/blob/537ac39314f4d88ee0b7f19a54564bb98c7bfb72/train.py
 new_config = {
-
-    "optimization": {
-        "actor_learning_rate": 1e-3,
-        "critic_learning_rate": 1e-3,
-        "entropy_learning_rate": 1e-4,
-        "actor_beta": 0.9,
-        "critic_beta": 0.9,
-        "alpha_beta": 0.5,
-        "encoder_learning_rate": 1e-3, 
-    },
- 
-    "actor_update_freq": 2,
-    "cpc_update_freq": 1,
-    "target_network_update_freq": 2,
-
-    "critic_tau": 0.01,
-    "encoder_tau": 0.05,
-
-    "learning_starts": 1000,
-    "train_batch_size": 32,
-    "gamma": 0.99,
-
-    "initial_alpha": 0.1,
-
     # customs 
-    "embed_dim": 128,
-    "encoder_type": "pixel",
-    "num_layers": 4,
-    "num_filters": 32,
-    "cropped_image_size": 54,
+    "embed_dim": 256,
+    "encoder_type": "impala",
 }
 SAC_CONFIG = DEFAULT_CONFIG.copy()
 SAC_CONFIG.update(new_config)
 
 
-
-CurlSACTrainer = GenericOffPolicyTrainer.with_updates(
-    name="CurlSAC",
+BaselineSACTrainer = GenericOffPolicyTrainer.with_updates(
+    name="BaselineSAC",
     default_config=SAC_CONFIG,
     validate_config=validate_config,
-    default_policy=CurlSACTorchPolicy,
-    get_policy_class=get_sac_policy_class
+    default_policy=BaselineSACTorchPolicy,
+    get_policy_class=get_policy_class,
 )
-
-

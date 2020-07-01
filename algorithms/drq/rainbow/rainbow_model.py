@@ -10,106 +10,10 @@ F = None
 if nn:
     F = nn.functional
 
-
+from kornia.augmentation import RandomCrop
 from models import make_encoder
+from utils.utils import NoisyLinear
 
-
-#######################################################################################################
-#####################################   Helper stuff   #####################################################
-#######################################################################################################
-
-'''
-# old implementation
-def _noisy_layer(self, action_in, out_size, sigma0, non_linear=True):
-        """
-        a common dense layer: y = w^{T}x + b
-        a noisy layer: y = (w + \\epsilon_w*\\sigma_w)^{T}x +
-            (b+\\epsilon_b*\\sigma_b)
-        where \epsilon are random variables sampled from factorized normal
-        distributions and \\sigma are trainable variables which are expected to
-        vanish along the training procedure
-        """
-        in_size = int(action_in.shape[1])
-
-        epsilon_in = torch.normal(
-            mean=torch.zeros([in_size]), std=torch.ones([in_size]))
-        epsilon_out = torch.normal(
-            mean=torch.zeros([out_size]), std=torch.ones([out_size]))
-        epsilon_in = self._f_epsilon(epsilon_in)
-        epsilon_out = self._f_epsilon(epsilon_out)
-        epsilon_w = torch.matmul(
-            torch.unsqueeze(epsilon_in, -1),
-            other=torch.unsqueeze(epsilon_out, 0))
-        epsilon_b = epsilon_out
-
-        sigma_w = torch.Tensor(
-            data=np.random.uniform(
-                low=-1.0 / np.sqrt(float(in_size)),
-                high=1.0 / np.sqrt(float(in_size)),
-                size=[in_size, out_size]),
-            dtype=torch.float32,
-            requires_grad=True)
-        # TF noise generation can be unreliable on GPU
-        # If generating the noise on the CPU,
-        # lowering sigma0 to 0.1 may be helpful
-        sigma_b = torch.Tensor(
-            data=np.full(
-                shape=[out_size], fill_value=sigma0 / np.sqrt(float(in_size))),
-            requires_grad=True)
-        w = torch.Tensor(
-            data=np.full(
-                shape=[in_size, out_size],
-                fill_value=6 / np.sqrt(float(in_size) + float(out_size))),
-            requires_grad=True)
-        b = torch.Tensor(data=np.zeros([out_size]), requires_grad=True)
-        action_activation = torch.matmul(action_in, w + sigma_w * epsilon_w) \
-            + b + sigma_b * epsilon_b
-
-        if not non_linear:
-            return action_activation
-        return nn.functional.relu(action_activation)
-
-def _f_epsilon(self, x):
-        return torch.sign(x) * torch.pow(torch.abs(x), 0.5)
-'''
-
-
-class NoisyLinear(nn.Linear):
-    """ Noisy linear layer with independent Gaussian noise
-    reference: https://github.com/Kaixhin/NoisyNet-A3C/blob/master/model.py#L10-L37
-    """
-    def __init__(self, in_features, out_features, sigma_init=0.017, bias=True):
-        super(NoisyLinear, self).__init__(in_features, out_features, bias=True)  # TODO: Adapt for no bias
-        # µ^w and µ^b reuse self.weight and self.bias
-        self.sigma_init = sigma_init
-        self.sigma_weight = nn.Parameter(torch.Tensor(out_features, in_features))  # σ^w
-        self.sigma_bias = nn.Parameter(torch.Tensor(out_features))  # σ^b
-        self.register_buffer('epsilon_weight', torch.zeros(out_features, in_features))
-        self.register_buffer('epsilon_bias', torch.zeros(out_features))
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        if hasattr(self, 'sigma_weight'):  # Only init after all params added (otherwise super().__init__() fails)
-            nn.init.uniform(self.weight, -math.sqrt(3 / self.in_features), math.sqrt(3 / self.in_features))
-            nn.init.uniform(self.bias, -math.sqrt(3 / self.in_features), math.sqrt(3 / self.in_features))
-            nn.init.constant(self.sigma_weight, self.sigma_init)
-            nn.init.constant(self.sigma_bias, self.sigma_init)
-
-    def forward(self, input):
-        # set noise first, remember to set model flag train() or eval()
-        if self.training:
-            self.sample_noise()
-        else:
-            self.remove_noise()
-        return F.linear(input, self.weight + self.sigma_weight * Variable(self.epsilon_weight), self.bias + self.sigma_bias * Variable(self.epsilon_bias))
-
-    def sample_noise(self):
-        self.epsilon_weight = torch.randn(self.out_features, self.in_features)
-        self.epsilon_bias = torch.randn(self.out_features)
-
-    def remove_noise(self):
-        self.epsilon_weight = torch.zeros(self.out_features, self.in_features)
-        self.epsilon_bias = torch.zeros(self.out_features)
 
 
 #######################################################################################################
@@ -139,15 +43,15 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
             #  Exploration type and do not have any LayerNorm layers in
             #  the net.
             add_layer_norm=False,
-            # customs
-            embed_dim = 256,
             num_atoms=1,
             v_min=-10.0,
             v_max=10.0,
+            # customs
+            embed_dim = 256,
+            encoder_type="impala",
             augmentation=False,
             aug_num=2,
             max_shift=4,
-            encoder_type="impala",
             **kwargs):
         """Initialize variables of this model.
         Extra model kwargs:
@@ -266,7 +170,7 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
             obs_shape = obs_space.shape[-2]
             self.trans = nn.Sequential(
                 nn.ReplicationPad2d(max_shift),
-                kornia.augmentation.RandomCrop((obs_shape, obs_shape))
+                RandomCrop((obs_shape, obs_shape))
             )
     
     def get_advantages_or_q_values(self, model_out):
@@ -306,10 +210,8 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
         """ return action logits/scores # return embedding value
         """
         x, state = self.get_embeddings(input_dict, state, seq_lens)
-        # logits = self.get_policy_output(x)
-        # logits = self.get_advantages_or_q_values(x)
-        logits = self.get_advantages_or_q_values(x)[0]
-        return logits, state
+        # logits = self.get_advantages_or_q_values(x)[0]
+        return x, state
 
     def get_embeddings(self, input_dict, state, seq_lens, permute=True):
         """ encode observations 
@@ -320,15 +222,6 @@ class DrqRainbowTorchModel(TorchModelV2, nn.Module):
         x = self.encoder(x)
         return x, state
 
-    def sample_noise(self):
-        if not self.no_noise:
-            self.fc_actor.sample_noise()
-            self.fc_critic.sample_noise()
-
-    def remove_noise(self):
-        if not self.no_noise:
-            self.fc_actor.remove_noise()
-            self.fc_critic.remove_noise()
 
 
 #######################################################################################################

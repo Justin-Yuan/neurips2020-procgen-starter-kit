@@ -64,6 +64,9 @@ def build_q_model_and_distribution(policy, obs_space, action_space, config):
         # TODO(sven): Move option to add LayerNorm after each Dense
         #  generically into ModelCatalog.
         add_layer_norm=add_layer_norm,
+        # customs 
+        embed_dim=config["embed_dim"],
+        encoder_type=config["encoder_type"],
         augmentation=config["augmentation"],
         aug_num=config["aug_num"],
         max_shift=config["max_shift"]
@@ -85,6 +88,9 @@ def build_q_model_and_distribution(policy, obs_space, action_space, config):
         # TODO(sven): Move option to add LayerNorm after each Dense
         #  generically into ModelCatalog.
         add_layer_norm=add_layer_norm,
+        # customs 
+        embed_dim=config["embed_dim"],
+        encoder_type=config["encoder_type"],
         augmentation=config["augmentation"],
         aug_num=config["aug_num"],
         max_shift=config["max_shift"]
@@ -218,7 +224,9 @@ class ComputeTDErrorMixin:
             input_dict[PRIO_WEIGHTS] = importance_weights
 
             # Do forward pass on loss to update td error attribute
-            build_q_losses(self, self.model, None, input_dict)
+            # build_q_losses(self, self.model, None, input_dict)
+            # NOTE: customs but not sure if works 
+            self._loss(self, self.model, None, input_dict)
 
             return self.q_loss.td_error
 
@@ -259,7 +267,8 @@ NoAugDQNTorchPolicy = build_torch_policy(
     make_model_and_action_dist=build_q_model_and_distribution,
     action_distribution_fn=get_distribution_inputs_and_class,
     # shared 
-    get_default_config=lambda: ray.rllib.agents.dqn.dqn.DEFAULT_CONFIG,
+    # get_default_config=lambda: ray.rllib.agents.dqn.dqn.DEFAULT_CONFIG,
+    get_default_config=lambda: algorithms.drq.dqn.dqn_trainer.DQN_CONFIG,
     stats_fn=build_q_stats,
     postprocess_fn=postprocess_nstep_and_prio,
     optimizer_fn=adam_optimizer,
@@ -279,7 +288,8 @@ DrqDQNTorchPolicy = build_torch_policy(
     make_model_and_action_dist=build_q_model_and_distribution,
     action_distribution_fn=get_distribution_inputs_and_class,
     # shared 
-    get_default_config=lambda: ray.rllib.agents.dqn.dqn.DEFAULT_CONFIG,
+    # get_default_config=lambda: ray.rllib.agents.dqn.dqn.DEFAULT_CONFIG,
+    get_default_config=lambda: algorithms.drq.dqn.dqn_trainer.DQN_CONFIG,
     stats_fn=build_q_stats,
     postprocess_fn=postprocess_nstep_and_prio,
     optimizer_fn=adam_optimizer,

@@ -5,15 +5,13 @@ from ray.rllib.agents.ppo.ppo_tf_policy import PPOTFPolicy
 from ray.rllib.agents.ppo.ppo_torch_policy import PPOTorchPolicy
 from ray.rllib.agents.trainer_template import build_trainer
 from ray.rllib.execution.rollout_ops import ParallelRollouts, ConcatBatches
-from algorithms.drq.ppo.utils.new_rollout_ops import StandardizeFields, SelectExperiences
+from experiments.build.new_rollout_ops import StandardizeFields, SelectExperiences
 from ray.rllib.execution.train_ops import TrainOneStep
 from ray.rllib.execution.metric_ops import StandardMetricsReporting
-from ray.rllib.utils import try_import_tf
 
 # custom imports
-from algorithms.drq.ppo.ppo_policy import NoAugPPOTorchPolicy, DrqPPOTorchPolicy
+from algorithms.baselines.ppo.ppo_policy import BaselinePPOTorchPolicy
 
-tf = try_import_tf()
 
 logger = logging.getLogger(__name__)
 
@@ -90,22 +88,6 @@ DEFAULT_CONFIG = with_common_config({
 #######################################################################################################
 #####################################   Helper funcs   #####################################################
 #######################################################################################################
-
-def get_policy_class(config):
-    ################################################################################################
-    # if config["use_pytorch"] == "torch":
-    #     from ray.rllib.agents.ppo.ppo_torch_policy import PPOTorchPolicy
-    #     return PPOTorchPolicy
-    # else:
-    #     return PPOTFPolicy
-
-    # NOTE: switch between policy with/without input augmentations
-    if config["augmentation"] == True:
-        return DrqPPOTorchPolicy
-    else:
-        return NoAugPPOTorchPolicy
-    ################################################################################################
-
 
 def warn_about_bad_reward_scales(config, result):
     if result["policy_reward_mean"]:
@@ -212,6 +194,10 @@ def execution_plan(workers, config):
         .for_each(lambda result: warn_about_bad_reward_scales(config, result))
 
 
+def get_policy_class(config):
+    return BaselinePPOTorchPolicy
+
+
 #######################################################################################################
 #####################################   Trainer   #####################################################
 #######################################################################################################
@@ -220,19 +206,15 @@ new_config = {
     # customs
     "embed_dim": 256,
     "encoder_type": "impala",
-
-    "augmentation": True,
-    "aug_num": 2,
-    "max_shift": 4,
 }
 PPO_CONFIG = DEFAULT_CONFIG.copy()
 PPO_CONFIG.update(new_config)
 
 
-DrqPPOTrainer = build_trainer(
-    name="DrqPPO",
+BaselinePPOTrainer = build_trainer(
+    name="BaselinePPO",
     default_config=PPO_CONFIG,
-    default_policy=DrqPPOTorchPolicy,
+    default_policy=BaselinePPOTorchPolicy,
     get_policy_class=get_policy_class,
     execution_plan=execution_plan,
     validate_config=validate_config

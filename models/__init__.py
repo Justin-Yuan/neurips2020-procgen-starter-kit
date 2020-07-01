@@ -1,6 +1,7 @@
 from models.pixel_encoder import IdentityEncoder, PixelEncoder
 from models.impala_cnn_torch import ImpalaEncoder
 from models.pixel_decoder import PixelDecoder
+from models.vision_network_torch import VisionNetworkEncoder
 
 #######################################################################################################
 #####################################   Encoders   #####################################################
@@ -10,6 +11,7 @@ _AVAILABLE_ENCODERS = {
     "identity": IdentityEncoder,
     "pixel": PixelEncoder, 
     "impala": ImpalaEncoder,
+    "vision": VisionNetworkEncoder,
 }
 
 # def make_encoder(

@@ -7,7 +7,6 @@ from ray.rllib.utils.annotations import override
 
 torch, nn = try_import_torch()
 
-from kornia.augmentation import RandomCrop
 from models import make_encoder
 
 
@@ -15,7 +14,7 @@ from models import make_encoder
 #####################################   Helper stuff   #####################################################
 #######################################################################################################
 
-class DrqDQNTorchModel(TorchModelV2, nn.Module):
+class BaselineDQNTorchModel(TorchModelV2, nn.Module):
     """Extension of standard TorchModelV2 to provide dueling-Q functionality.
     """
 
@@ -40,9 +39,6 @@ class DrqDQNTorchModel(TorchModelV2, nn.Module):
             #  customs 
             embed_dim = 256,
             encoder_type="impala",
-            augmentation=False,
-            aug_num=2,
-            max_shift=4,
             **kwargs):
         """Initialize variables of this model.
         Extra model kwargs:
@@ -62,7 +58,7 @@ class DrqDQNTorchModel(TorchModelV2, nn.Module):
             add_layer_norm (bool): Enable layer norm (for param noise).
         """
         nn.Module.__init__(self)
-        super(DrqDQNTorchModel, self).__init__(obs_space, action_space,
+        super(BaselineDQNTorchModel, self).__init__(obs_space, action_space,
                                             num_outputs, model_config, name)
 
         # NOTE: customs 
@@ -74,7 +70,7 @@ class DrqDQNTorchModel(TorchModelV2, nn.Module):
   
         # NOTE: value output branches 
         self.dueling = dueling
-        # ins = num_outputs
+        # ins = num_outputså
         ins = embed_dim
 
         # Dueling case: Build the shared (advantages and value) fc-network.
@@ -135,16 +131,7 @@ class DrqDQNTorchModel(TorchModelV2, nn.Module):
 
         self.advantage_module = advantage_module
         self.value_module = value_module
-
-        # NOTE: customs 
-        self.augmentation = augmentation
-        self.aug_num = aug_num
-        if augmentation:
-            obs_shape = obs_space.shape[-2]
-            self.trans = nn.Sequential(
-                nn.ReplicationPad2d(max_shift),
-                RandomCrop((obs_shape, obs_shape))
-            )
+        
 
     def get_advantages_or_q_values(self, model_out):
         """ Returns distributional values for Q(s, a) given a state embedding.
@@ -166,6 +153,8 @@ class DrqDQNTorchModel(TorchModelV2, nn.Module):
     @override(TorchModelV2)
     def forward(self, input_dict, state, seq_lens):
         """ return embedding value
+        NOTE: only output embedded output to fit the "compute_q_values" func signature
+        from https://github.com/ray-project/ray/blob/master/rllib/agents/dqn/dqn_torch_policy.py
         """
         x, state = self.get_embeddings(input_dict, state, seq_lens)
         # logits = self.get_policy_output(x)
@@ -182,4 +171,4 @@ class DrqDQNTorchModel(TorchModelV2, nn.Module):
 
 
 # Register model in ModelCatalog
-ModelCatalog.register_custom_model("drq_dqn", DrqDQNTorchModel)
+ModelCatalog.register_custom_model("baseline_dqn", BaselineDQNTorchModel)
