@@ -753,6 +753,9 @@ def setup_late_mixins(policy, obs_space, action_space, config):
 #####################################   Policy   #####################################################
 #######################################################################################################
 
+# hack to avoid cycle imports 
+import algorithms.sac_ae.sac_ae_trainer
+
 SACAETorchPolicy = build_torch_policy(
     name="SACAETorchPolicy",
     loss_fn=actor_critic_loss,

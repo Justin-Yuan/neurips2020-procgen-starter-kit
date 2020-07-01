@@ -509,6 +509,9 @@ def extra_action_out_fn(policy, input_dict, state_batches, model, action_dist):
 #####################################   Policy   #####################################################
 #######################################################################################################
 
+# hack to avoid cycle imports 
+import algorithms.drq.rainbow.rainbow_trainer
+
 NoAugRainbowTorchPolicy = build_torch_policy(
     name="NoAugRainbowTorchPolicy",
     loss_fn=build_rainbow_q_losses,

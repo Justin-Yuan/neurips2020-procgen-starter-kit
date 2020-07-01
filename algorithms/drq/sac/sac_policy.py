@@ -570,6 +570,9 @@ def setup_late_mixins(policy, obs_space, action_space, config):
 #####################################   Policy   #####################################################
 #######################################################################################################
 
+# hack to avoid cycle imports 
+import algorithms.drq.sac.sac_trainer
+
 NoAugSACTorchPolicy = build_torch_policy(
     name="NoAugSACTorchPolicy",
     loss_fn=actor_critic_loss,

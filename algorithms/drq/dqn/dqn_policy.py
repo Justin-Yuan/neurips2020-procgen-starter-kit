@@ -261,6 +261,9 @@ def extra_action_out_fn(policy, input_dict, state_batches, model, action_dist):
 #####################################   Policy   #####################################################
 #######################################################################################################
 
+# hack to avoid cycle imports 
+import algorithms.drq.dqn.dqn_trainer
+
 NoAugDQNTorchPolicy = build_torch_policy(
     name="NoAugDQNTorchPolicy",
     loss_fn=build_q_losses,

@@ -106,6 +106,9 @@ def get_distribution_inputs_and_class(policy,
 #####################################   Policy   #####################################################
 #######################################################################################################
 
+# hack to avoid cycle imports 
+import algorithms.baselines.dqn.dqn_trainer
+
 BaselineDQNTorchPolicy = DQNTorchPolicy.with_updates(
     name="BaselineDQNTorchPolicy",
     make_model_and_action_dist=build_q_model_and_distribution,

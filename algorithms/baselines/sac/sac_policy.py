@@ -134,6 +134,9 @@ def action_distribution_fn(policy,
 #####################################   Policy   #####################################################
 #######################################################################################################
 
+# hack to avoid cycle imports 
+import algorithms.baselines.sac.sac_trainer
+
 BaselineSACTorchPolicy = SACTorchPolicy.with_updates(
     name="BaselineSACTorchPolicy",
     make_model_and_action_dist=build_sac_model_and_action_dist,

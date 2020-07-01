@@ -62,6 +62,9 @@ def get_dist_class(config, action_space):
 #####################################   Policy   #####################################################
 #######################################################################################################
 
+# hack to avoid cycle imports 
+import algorithms.baselines.ppo.ppo_trainer
+
 BaselinePPOTorchPolicy = PPOTorchPolicy.with_updates(
     name="BaselinePPOTorchPolicy",
     make_model_and_action_dist=build_ppo_model_and_action_dist,

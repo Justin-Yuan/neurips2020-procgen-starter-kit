@@ -618,6 +618,9 @@ def extra_action_out_fn(policy, input_dict, state_batches, model, action_dist):
 #####################################   Policy   #####################################################
 #######################################################################################################
 
+# hack to avoid cycle imports 
+import algorithms.curl.rainbow.rainbow_trainer
+
 CurlRainbowTorchPolicy = build_torch_policy(
     name="CurlRainbowTorchPolicy",
     # loss updates shifted to policy.learn_on_batch

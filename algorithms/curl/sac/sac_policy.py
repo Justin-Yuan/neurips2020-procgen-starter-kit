@@ -611,6 +611,9 @@ def setup_late_mixins(policy, obs_space, action_space, config):
 #####################################   Policy   #####################################################
 #######################################################################################################
 
+# hack to avoid cycle imports 
+import algorithms.curl.sac.sac_trainer
+
 CurlSACTorchPolicy = build_torch_policy(
     name="CurlSACTorchPolicy",
     # loss updates shifted to policy.learn_on_batch

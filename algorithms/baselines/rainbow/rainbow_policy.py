@@ -370,6 +370,9 @@ def after_init(policy, obs_space, action_space, config):
 #####################################   Policy   #####################################################
 #######################################################################################################
 
+# hack to avoid cycle imports 
+import algorithms.baselines.rainbow.rainbow_trainer
+
 BaselineRainbowTorchPolicy = DQNTorchPolicy.with_updates(
     name="BaselineRainbowTorchPolicy",
     loss_fn=build_rainbow_q_losses,
