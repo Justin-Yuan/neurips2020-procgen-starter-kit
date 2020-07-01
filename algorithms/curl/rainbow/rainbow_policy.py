@@ -519,7 +519,7 @@ class CurlMixin:
 
         # NOTE: loop through each loss and optimizer
         # optimize critics
-        critic_loss = build_rainbow_q_losses(self, self.q_model, _, train_batch):
+        critic_loss = build_rainbow_q_losses(self, self.q_model, _, train_batch)
 
         self.critic_optim.zero_grad()
         critic_loss.backward()

@@ -20,15 +20,15 @@ def _import_custom_random_agent():
 #####################################   Baselines  #####################################################
 
 def _import_baseline_dqn_agent():
-    from .baselines.sac.sac_trainer import BaselineDQNTrainer
+    from .baselines.dqn.dqn_trainer import BaselineDQNTrainer
     return BaselineDQNTrainer
 
 def _import_baseline_rainbow_agent():
-    from .baselines.sac.sac_trainer import BaselineRainbowTrainer
+    from .baselines.rainbow.rainbow_trainer import BaselineRainbowTrainer
     return BaselineRainbowTrainer
 
 def _import_baseline_ppo_agent():
-    from .baselines.sac.sac_trainer import BaselinePPOTrainer
+    from .baselines.ppo.ppo_trainer import BaselinePPOTrainer
     return BaselinePPOTrainer
 
 def _import_baseline_sac_agent():

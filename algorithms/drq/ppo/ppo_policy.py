@@ -23,6 +23,10 @@ from ray.rllib.evaluation.postprocessing import Postprocessing, compute_advantag
 from ray.rllib.agents.ppo.ppo_torch_policy import ppo_surrogate_loss
 from algorithms.drq.ppo.ppo_model import DrqPPOTorchModel
 
+import os 
+import sys
+sys.path.insert(0, os.path.abspath("../../.."))
+
 torch, nn = try_import_torch()
 
 logger = logging.getLogger(__name__)
@@ -387,6 +391,8 @@ def setup_mixins(policy, obs_space, action_space, config):
 #######################################################################################################
 #####################################   Policy   #####################################################
 #######################################################################################################
+
+import algorithms.drq.ppo.ppo_trainer
 
 NoAugPPOTorchPolicy = build_torch_policy(
     name="NoAugPPOTorchPolicy",
