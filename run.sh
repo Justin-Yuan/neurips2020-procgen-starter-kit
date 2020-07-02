@@ -10,7 +10,8 @@ set -e
 export PYTHONPATH=$PYTHONPATH:`pwd`
 export EXPERIMENT_DEFAULT="experiments/drq_ppo.yaml"
 export EXPERIMENT=${EXPERIMENT:-$EXPERIMENT_DEFAULT}
-echo $PYTHONPATH
+
+
 
 if [[ -z $AICROWD_IS_GRADING ]]; then
     ##########################################################################

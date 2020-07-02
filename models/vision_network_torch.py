@@ -27,6 +27,7 @@ class ConvLayers(nn.Module):
         Arguments:
             - conv_filters: list of [x, x, x] for (out_channels, kernel, stride)
         """
+        super(ConvLayers, self).__init__()
         convs, shape = [], obs_shape
         for out_channels, kernel, stride in conv_filters:
             convs.append(
@@ -53,6 +54,7 @@ class FCLayers(nn.Module):
         Arguments:
             - fcnet_hiddens: [x, x, x]
         """ 
+        super(FCLayers, self).__init__()
         fcs, ins = [], in_dim
         for dim in fcnet_hiddens:
             fcs.append(nn.Linear(ins, dim))
@@ -90,7 +92,7 @@ class VisionNetworkEncoder(nn.Module):
         out_features=256, 
         conv_filters=None,
         conv_activation="relu", 
-        fcnet_hiddens=[],
+        fcnet_hiddens=[256],
         fcnet_activation="relu",
         last_act="relu"
     ):
